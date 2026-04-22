@@ -31,6 +31,7 @@ import {
 import { formatRelativeTime, cn } from "@/lib/utils";
 import { useToast } from "@/components/ui/toast-provider";
 import { EmptyState } from "@/components/empty-state";
+import { SkeletonCard } from "@/components/ui/skeleton";
 
 export default function RefreshPage() {
   const queryClient = useQueryClient();
@@ -130,7 +131,11 @@ export default function RefreshPage() {
       {/* Approvals List */}
       <div className="space-y-4">
         {isLoading ? (
-          <div className="text-center py-8">Loading...</div>
+          <div className="space-y-4">
+            <SkeletonCard className="h-24" />
+            <SkeletonCard className="h-24" />
+            <SkeletonCard className="h-24" />
+          </div>
         ) : data?.items.length === 0 ? (
           <EmptyState
             icon={RefreshCw}

@@ -17,7 +17,9 @@ import { Check, X, Save, RotateCcw } from 'lucide-react'
 import { GoabaseSyncPanel } from '@/components/GoabaseSyncPanel'
 import { PipelineControlPanel } from '@/components/PipelineControlPanel'
 import { useToast } from '@/components/ui/toast-provider'
+import { SkeletonCard } from '@/components/ui/skeleton'
 import type { SettingCategory } from '@/types'
+import { z } from 'zod'
 
 const categoryLabels: Record<string, string> = {
   pipeline: 'Pipeline',
@@ -71,13 +73,48 @@ export default function SettingsPage() {
     },
   })
 
+  const [editError, setEditError] = useState<string | null>(null)
+
   const startEditing = (key: string, value: unknown) => {
     setEditing(key)
     setEditValue(value)
+    setEditError(null)
   }
 
-  const saveEdit = (key: string) => {
-    updateMutation.mutate({ key, value: editValue })
+  const saveEdit = (key: string, valueType: string) => {
+    let validatedValue = editValue
+
+    if (valueType === 'json') {
+      if (typeof editValue === 'string') {
+        try {
+          validatedValue = JSON.parse(editValue as string)
+        } catch {
+          setEditError('Invalid JSON')
+          return
+        }
+      }
+    }
+
+    if (valueType === 'integer') {
+      const result = z.number().int().safeParse(editValue)
+      if (!result.success) {
+        setEditError('Must be a whole number')
+        return
+      }
+      validatedValue = result.data
+    }
+
+    if (valueType === 'float') {
+      const result = z.number().safeParse(editValue)
+      if (!result.success) {
+        setEditError('Must be a number')
+        return
+      }
+      validatedValue = result.data
+    }
+
+    setEditError(null)
+    updateMutation.mutate({ key, value: validatedValue })
   }
 
   const renderValue = (setting: NonNullable<typeof settings>['settings'][number]) => {
@@ -157,7 +194,9 @@ export default function SettingsPage() {
     return (
       <div className="space-y-6">
         <h1 className="text-3xl font-bold">Settings</h1>
-        <div className="text-center py-8">Loading...</div>
+        <SkeletonCard className="h-40" />
+        <SkeletonCard className="h-64" />
+        <SkeletonCard className="h-64" />
       </div>
     )
   }
@@ -260,12 +299,17 @@ export default function SettingsPage() {
                       </Badge>
                     </div>
                     <div className="flex items-center gap-2">
-                      {renderValue(setting)}
+                      <div className="flex flex-col items-end gap-1">
+                        {renderValue(setting)}
+                        {editing === setting.key && editError && (
+                          <p className="text-xs text-destructive">{editError}</p>
+                        )}
+                      </div>
                       {setting.editable &&
                         (editing === setting.key ? (
                           <Button
                             size="sm"
-                            onClick={() => saveEdit(setting.key)}
+                            onClick={() => saveEdit(setting.key, setting.value_type)}
                             disabled={updateMutation.isPending}
                           >
                             <Save className="h-4 w-4" />

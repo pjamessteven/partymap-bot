@@ -14,6 +14,7 @@ import type { FestivalState, FestivalAction } from '@/types'
 import { useToast } from '@/components/ui/toast-provider'
 import { StateBadge } from '@/components/state-badge'
 import { EmptyState } from '@/components/empty-state'
+import { SkeletonList } from '@/components/ui/skeleton'
 
 const states: FestivalState[] = [
   'discovered',
@@ -121,15 +122,13 @@ export default function PendingPage() {
         <CardHeader>
           <CardTitle>
             {isLoading
-              ? 'Loading...'
+              ? <span className="inline-block h-6 w-32 bg-muted animate-pulse rounded-md" />
               : `${pending?.length ?? 0} Pending Actions`}
           </CardTitle>
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <div className="text-center py-8 text-muted-foreground">
-              Loading...
-            </div>
+            <SkeletonList rows={4} />
           ) : pending?.length === 0 ? (
             <EmptyState
               icon={Inbox}

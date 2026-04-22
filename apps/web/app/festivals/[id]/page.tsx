@@ -35,6 +35,7 @@ import { AgentStreamViewer } from '@/components/AgentStreamViewer'
 import { useToast } from '@/components/ui/toast-provider'
 import { StateBadge } from '@/components/state-badge'
 import { ConfirmDialog, PromptDialog } from '@/components/ui/dialog-confirm'
+import { SkeletonCard } from '@/components/ui/skeleton'
 
 export default function FestivalDetailPage() {
   const params = useParams()
@@ -131,7 +132,13 @@ export default function FestivalDetailPage() {
             Back to Festivals
           </Button>
         </Link>
-        <div className="text-center py-8">Loading...</div>
+        <div className="space-y-6">
+          <SkeletonCard className="h-16" />
+          <div className="grid gap-6 md:grid-cols-2">
+            <SkeletonCard className="h-64" />
+            <SkeletonCard className="h-64" />
+          </div>
+        </div>
       </div>
     )
   }
