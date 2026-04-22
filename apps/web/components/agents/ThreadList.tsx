@@ -4,33 +4,16 @@ import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { getThreads } from '@/lib/api'
+import type { Thread } from '@/lib/api'
 import { Play, Check, X, Clock, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { formatDistanceToNow } from 'date-fns'
-
-interface Thread {
-  thread_id: string
-  agent_type: string
-  status: 'running' | 'completed' | 'failed'
-  festival_id?: string
-  event_name?: string
-  started_at: string
-  completed_at?: string
-  total_tokens: number
-  cost_cents: number
-  result_data?: Record<string, unknown>
-}
 
 interface ThreadListProps {
   agentType: 'research' | 'discovery'
   selectedThread: string | null
   onSelectThread: (threadId: string) => void
-}
-
-async function getThreads(agentType: string): Promise<{ threads: Thread[] }> {
-  const response = await fetch(`/api/threads?agent_type=${agentType}&limit=50`)
-  if (!response.ok) throw new Error('Failed to fetch threads')
-  return response.json()
 }
 
 export function ThreadList({ agentType, selectedThread, onSelectThread }: ThreadListProps) {

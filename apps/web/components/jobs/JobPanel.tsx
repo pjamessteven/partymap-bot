@@ -7,34 +7,32 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { AgentStream } from '@/components/agents/AgentStream'
 import { ThreadList } from '@/components/agents/ThreadList'
+import {
+  startDiscoveryJob,
+  stopDiscoveryJob,
+  startResearchJob,
+  stopResearchJob,
+  startSyncJob,
+  stopSyncJob,
+  startGoabaseJob,
+  stopGoabaseJob,
+  getJobsStatus,
+} from '@/lib/api'
+import type { JobStatusDetail } from '@/types'
 import { Loader2, Play, Square, RefreshCw, CheckCircle, XCircle, Clock } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useToast } from '@/components/ui/toast-provider'
 
 interface JobPanelProps {
   jobType: 'discovery' | 'research' | 'sync' | 'goabase'
   showStream: boolean
 }
 
-interface JobStatus {
-  status: 'idle' | 'running' | 'completed' | 'failed'
-  task_id?: string
-  started_at?: string
-  progress?: {
-    current: number
-    total: number
-    percent: number
-  }
-  currently_processing?: Array<{
-    id: string
-    name: string
-    started_at: string
-  }>
-}
-
 export function JobPanel({ jobType, showStream }: JobPanelProps) {
   const [selectedThread, setSelectedThread] = useState<string | null>(null)
   const [isStarting, setIsStarting] = useState(false)
   const [isStopping, setIsStopping] = useState(false)
+  const { success, error } = useToast()
 
   // Fetch job status
   const { data: status, refetch } = useJobStatus(jobType)
@@ -42,27 +40,27 @@ export function JobPanel({ jobType, showStream }: JobPanelProps) {
   const handleStart = async () => {
     setIsStarting(true)
     try {
-      let response
       switch (jobType) {
         case 'discovery':
-          response = await fetch('/api/jobs/discovery/start', { method: 'POST' })
+          await startDiscoveryJob()
           break
         case 'goabase':
-          response = await fetch('/api/jobs/goabase/start', { method: 'POST' })
+          await startGoabaseJob()
           break
         case 'research':
-          response = await fetch('/api/jobs/research/start', { method: 'POST' })
+          await startResearchJob()
           break
         case 'sync':
-          response = await fetch('/api/jobs/sync/start', { method: 'POST' })
+          await startSyncJob()
           break
         default:
           throw new Error(`Unknown job type: ${jobType}`)
       }
-      if (!response.ok) throw new Error('Failed to start job')
+      success(`${jobType} job started`)
       await refetch()
-    } catch (error) {
-      console.error('Failed to start job:', error)
+    } catch (err) {
+      console.error('Failed to start job:', err)
+      error(`Failed to start ${jobType} job`)
     } finally {
       setIsStarting(false)
     }
@@ -71,27 +69,27 @@ export function JobPanel({ jobType, showStream }: JobPanelProps) {
   const handleStop = async () => {
     setIsStopping(true)
     try {
-      let response
       switch (jobType) {
         case 'discovery':
-          response = await fetch('/api/jobs/discovery/stop', { method: 'POST' })
+          await stopDiscoveryJob()
           break
         case 'goabase':
-          response = await fetch('/api/jobs/goabase/stop', { method: 'POST' })
+          await stopGoabaseJob()
           break
         case 'research':
-          response = await fetch('/api/jobs/research/stop', { method: 'POST' })
+          await stopResearchJob()
           break
         case 'sync':
-          response = await fetch('/api/jobs/sync/stop', { method: 'POST' })
+          await stopSyncJob()
           break
         default:
           throw new Error(`Unknown job type: ${jobType}`)
       }
-      if (!response.ok) throw new Error('Failed to stop job')
+      success(`${jobType} job stopped`)
       await refetch()
-    } catch (error) {
-      console.error('Failed to stop job:', error)
+    } catch (err) {
+      console.error('Failed to stop job:', err)
+      error(`Failed to stop ${jobType} job`)
     } finally {
       setIsStopping(false)
     }
@@ -138,7 +136,7 @@ export function JobPanel({ jobType, showStream }: JobPanelProps) {
 
 interface JobControlCardProps {
   jobType: string
-  status?: JobStatus
+  status?: JobStatusDetail
   isRunning: boolean
   isStarting: boolean
   isStopping: boolean
@@ -268,7 +266,7 @@ function ProcessingFestivals({ jobType }: { jobType: string }) {
 
 interface JobStatusPanelProps {
   jobType: string
-  status?: JobStatus
+  status?: JobStatusDetail
 }
 
 function JobStatusPanel({ jobType, status }: JobStatusPanelProps) {
@@ -302,10 +300,8 @@ function JobStatusPanel({ jobType, status }: JobStatusPanelProps) {
 function useJobStatus(jobType: string) {
   const { data, refetch } = useQuery({
     queryKey: ['job-status', jobType],
-    queryFn: async (): Promise<JobStatus> => {
-      const response = await fetch('/api/jobs/status')
-      if (!response.ok) throw new Error('Failed to fetch job status')
-      const statuses = await response.json()
+    queryFn: async (): Promise<JobStatusDetail> => {
+      const statuses = await getJobsStatus()
       return statuses[jobType] || { status: 'idle' }
     },
     refetchInterval: 2000,
