@@ -4,8 +4,9 @@ import json
 import uuid
 from typing import Any, Optional
 from datetime import datetime
+from src.utils.utc_now import utc_now
 from langchain_core.callbacks import AsyncCallbackHandler
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import BaseMessage, AIMessageChunk, message_to_dict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.models import AgentThread, AgentStreamEvent
@@ -58,7 +59,7 @@ class StreamPersistenceHandler(AsyncCallbackHandler):
         thread = await self.db.get(AgentThread, self.thread_id)
         if thread:
             thread.status = "completed"
-            thread.completed_at = datetime.utcnow()
+            thread.completed_at = utc_now()
             if outputs:
                 thread.result_data = self._serialize_safe(outputs)
 
@@ -78,7 +79,7 @@ class StreamPersistenceHandler(AsyncCallbackHandler):
         if thread:
             thread.status = "failed"
             thread.error_message = str(error)
-            thread.completed_at = datetime.utcnow()
+            thread.completed_at = utc_now()
 
         await self._flush_buffer()
         await self.db.commit()
@@ -98,20 +99,25 @@ class StreamPersistenceHandler(AsyncCallbackHandler):
 
     async def on_llm_new_token(self, token: str, **kwargs):
         """Called on each token (streaming)."""
-        # Buffer tokens and flush periodically
+        run_id = kwargs.get("run_id")
+        # Build an AIMessageChunk so historical replay works with useStream
+        chunk = AIMessageChunk(content=token, id=run_id)
+        # LangGraph messages-tuple format: [message_dict, metadata_dict]
         self.event_buffer.append(
             {
-                "type": "token",
-                "token": token,
-                "timestamp": datetime.utcnow().isoformat(),
+                "chunk": message_to_dict(chunk),
+                "metadata": {
+                    "run_id": run_id,
+                    "tags": kwargs.get("tags", []),
+                },
             }
         )
 
         if len(self.event_buffer) >= 50:  # Flush every 50 tokens
             await self._save_event(
                 event_type="messages",
-                event_data={"tokens": self.event_buffer},
-                run_id=kwargs.get("run_id"),
+                event_data={"items": self.event_buffer},
+                run_id=run_id,
             )
             self.event_buffer = []
 
@@ -121,7 +127,7 @@ class StreamPersistenceHandler(AsyncCallbackHandler):
         if self.event_buffer:
             await self._save_event(
                 event_type="messages",
-                event_data={"tokens": self.event_buffer},
+                event_data={"items": self.event_buffer},
                 run_id=kwargs.get("run_id"),
             )
             self.event_buffer = []
@@ -150,6 +156,16 @@ class StreamPersistenceHandler(AsyncCallbackHandler):
             run_id=kwargs.get("run_id"),
             usage=usage,
         )
+
+        # Broadcast token usage for live counter
+        if usage:
+            await self._broadcast({
+                "event": "metadata",
+                "data": {
+                    "usage": usage,
+                    "thread_id": self.thread_id,
+                },
+            })
 
     async def on_tool_start(self, serialized: dict, input_str: str, **kwargs):
         """Called when tool starts."""
@@ -201,9 +217,18 @@ class StreamPersistenceHandler(AsyncCallbackHandler):
         """Commit pending events."""
         await self.db.commit()
 
+    async def _broadcast(self, data: dict):
+        """Broadcast event via Redis if available."""
+        try:
+            from src.agents.streaming.broadcaster import get_broadcaster
+            broadcaster = await get_broadcaster()
+            await broadcaster.broadcast(self.thread_id, data)
+        except Exception:
+            pass  # Broadcasting is best-effort
+
     def _serialize_safe(self, obj: Any) -> Any:
         """Safely serialize object to JSON-compatible format."""
         try:
             return json.loads(json.dumps(obj, default=str))
-        except:
+        except (TypeError, ValueError):
             return str(obj)

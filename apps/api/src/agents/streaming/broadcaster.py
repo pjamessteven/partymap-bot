@@ -1,10 +1,14 @@
 """Redis-based broadcaster for multi-user stream viewing."""
 
 import json
+import logging
 import asyncio
 from typing import Set, Dict, Callable, Optional
 from datetime import datetime
+from src.utils.utc_now import utc_now
 from redis.asyncio import Redis
+
+logger = logging.getLogger(__name__)
 
 from src.config import get_settings
 
@@ -77,7 +81,7 @@ class StreamBroadcaster:
         await self.connect()
 
         # Add metadata
-        event["broadcast_at"] = datetime.utcnow().isoformat()
+        event["broadcast_at"] = utc_now().isoformat()
 
         # Publish to Redis
         await self.redis.publish(f"stream:{thread_id}", json.dumps(event))
@@ -88,7 +92,7 @@ class StreamBroadcaster:
                 try:
                     callback(event)
                 except Exception as e:
-                    print(f"Error notifying subscriber: {e}")
+                    logger.warning(f"Error notifying subscriber: {e}")
 
     async def _listen(self, thread_id: str):
         """Listen for Redis messages and dispatch to local subscribers."""
@@ -103,7 +107,7 @@ class StreamBroadcaster:
                         try:
                             callback(data)
                         except Exception as e:
-                            print(f"Error in subscriber callback: {e}")
+                            logger.warning(f"Error in subscriber callback: {e}")
 
 
 async def get_broadcaster() -> StreamBroadcaster:

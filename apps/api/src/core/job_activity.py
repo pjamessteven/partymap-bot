@@ -1,6 +1,7 @@
 """Job activity logging service with DB persistence."""
 
 from datetime import datetime, timedelta
+from src.utils.utc_now import utc_now
 from typing import Optional, List
 from uuid import UUID
 
@@ -213,7 +214,7 @@ class JobActivityLogger:
     @classmethod
     async def cleanup_old_activity(cls, days: int = 90) -> int:
         """Delete activity older than specified days."""
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        cutoff = utc_now() - timedelta(days=days)
         async with AsyncSessionLocal() as db:
             query = delete(JobActivity).where(JobActivity.created_at < cutoff)
             result = await db.execute(query)

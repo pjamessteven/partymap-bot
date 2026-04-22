@@ -150,11 +150,8 @@ export default function PendingPage() {
                     className="flex items-center justify-between rounded-lg border p-4"
                   >
                     <div className="flex items-center gap-4">
-                      <div
-                        className={`w-3 h-3 rounded-full ${getStateColor(
-                          item.state
-                        )}`}
-                      />
+                      <StateBadge state={item.state} className="hidden sm:inline-flex" />
+                      <div className={`w-3 h-3 rounded-full ${getStateColor(item.state)} sm:hidden`} />
                       <div>
                         <Link
                           href={`/festivals/${item.festival_id}`}

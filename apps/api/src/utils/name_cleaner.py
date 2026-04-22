@@ -2,6 +2,7 @@
 
 import re
 from datetime import datetime
+from src.utils.utc_now import utc_now
 from typing import Optional
 
 from sqlalchemy import select
@@ -212,7 +213,7 @@ def store_name_mapping_db(session, raw_name: str, clean_name: str, source: str =
         # Update existing mapping
         existing.clean_name = clean_name
         existing.use_count += 1
-        existing.updated_at = datetime.utcnow()
+        existing.updated_at = utc_now()
     else:
         # Create new mapping
         mapping = NameMapping(

@@ -1,6 +1,7 @@
 """Pydantic schemas for data validation."""
 
 from datetime import datetime
+from src.utils.utc_now import utc_now
 from decimal import Decimal
 from enum import Enum
 from typing import Any, Dict, List, Optional
@@ -83,6 +84,16 @@ class EventDateData(BaseModel):
         return [a for a in cleaned if not (a in seen or seen.add(a))]
 
 
+class ValidationResult(BaseModel):
+    """Result of festival data validation."""
+    is_valid: bool = False
+    status: str = "invalid"  # "ready", "needs_review", "invalid"
+    completeness_score: float = Field(0.0, ge=0.0, le=1.0)
+    errors: List[Dict[str, Any]] = Field(default_factory=list)
+    warnings: List[Dict[str, Any]] = Field(default_factory=list)
+    missing_fields: List[str] = Field(default_factory=list)
+
+
 class FestivalData(BaseModel):
     """
     Complete festival data split into:
@@ -129,6 +140,11 @@ class FestivalData(BaseModel):
         default=None, description="Original/raw name from discovery source"
     )
 
+    # Validation tracking
+    validation_status: str = Field(default="pending", description="pending, ready, needs_review, invalid")
+    validation_errors: List[Dict[str, Any]] = Field(default_factory=list)
+    validation_warnings: List[Dict[str, Any]] = Field(default_factory=list)
+
     @field_validator("event_dates")
     @classmethod
     def validate_event_dates(cls, v):
@@ -144,6 +160,108 @@ class FestivalData(BaseModel):
         if v and len(v) > 5:
             return v[:5]
         return v
+
+    def validate_for_sync(self) -> ValidationResult:
+        """
+        Validate festival data before PartyMap sync.
+        
+        Returns ValidationResult with status, errors, warnings, and completeness score.
+        """
+        errors = []
+        warnings = []
+        missing_fields = []
+        
+        # Required field checks
+        if not self.name or len(self.name.strip()) < 2:
+            errors.append({"field": "name", "message": "Name is required and must be at least 2 characters"})
+            missing_fields.append("name")
+        
+        if not self.description or len(self.description.strip()) < 10:
+            errors.append({"field": "description", "message": "Description must be at least 10 characters"})
+            missing_fields.append("description")
+            
+        if not self.full_description or len(self.full_description.strip()) < 20:
+            errors.append({"field": "full_description", "message": "Full description must be at least 20 characters"})
+            missing_fields.append("full_description")
+        
+        # Event dates validation
+        if not self.event_dates:
+            errors.append({"field": "event_dates", "message": "At least one event date is required"})
+            missing_fields.append("dates")
+        else:
+            for idx, ed in enumerate(self.event_dates):
+                # Check end_date > start_date
+                if ed.end and ed.start and ed.end <= ed.start:
+                    errors.append({
+                        "field": f"event_dates[{idx}].end",
+                        "message": "End date must be after start date"
+                    })
+                
+                # Check dates are in the future
+                from datetime import datetime
+                if ed.start and ed.start < datetime.now():
+                    warnings.append({
+                        "field": f"event_dates[{idx}].start",
+                        "message": "Event date is in the past"
+                    })
+                
+                # Check location
+                if not ed.location_description or len(ed.location_description.strip()) < 3:
+                    errors.append({
+                        "field": f"event_dates[{idx}].location",
+                        "message": "Location description is required"
+                    })
+                    if "location" not in missing_fields:
+                        missing_fields.append("location")
+                
+                # Ticket price validation
+                if ed.tickets:
+                    for t_idx, ticket in enumerate(ed.tickets):
+                        if ticket.price_min is not None and ticket.price_max is not None:
+                            if ticket.price_max < ticket.price_min:
+                                errors.append({
+                                    "field": f"event_dates[{idx}].tickets[{t_idx}].price_max",
+                                    "message": "Maximum price must be greater than or equal to minimum price"
+                                })
+        
+        # Media validation
+        if not self.logo_url:
+            warnings.append({"field": "logo_url", "message": "No logo image selected"})
+        
+        if not self.media_items:
+            warnings.append({"field": "media_items", "message": "No gallery images"})
+        
+        # Tags validation
+        if not self.tags:
+            warnings.append({"field": "tags", "message": "No tags assigned"})
+        elif len(self.tags) < 2:
+            warnings.append({"field": "tags", "message": "Consider adding more tags for better discoverability"})
+        
+        # Calculate completeness score
+        required_fields = ["name", "description", "full_description", "event_dates"]
+        optional_fields = ["logo_url", "media_items", "tags", "youtube_url", "website_url"]
+        
+        required_score = sum(1 for f in required_fields if f not in missing_fields) / len(required_fields)
+        optional_score = sum(1 for f in optional_fields if getattr(self, f, None)) / len(optional_fields)
+        
+        completeness_score = (required_score * 0.7) + (optional_score * 0.3)
+        
+        # Determine status
+        if errors:
+            status = "invalid"
+        elif warnings or completeness_score < 0.8:
+            status = "needs_review"
+        else:
+            status = "ready"
+        
+        return ValidationResult(
+            is_valid=(status == "ready"),
+            status=status,
+            completeness_score=round(completeness_score, 2),
+            errors=errors,
+            warnings=warnings,
+            missing_fields=missing_fields
+        )
 
 
 class DiscoveredFestival(BaseModel):
@@ -463,7 +581,7 @@ class FestivalActionResponse(BaseModel):
     task_id: Optional[str] = Field(None, description="Celery task ID if action was queued")
     queued: bool = Field(..., description="Whether the action was queued for async processing")
     timestamp: datetime = Field(
-        default_factory=datetime.utcnow, description="When the action was triggered"
+        default_factory=utc_now, description="When the action was triggered"
     )
 
 
@@ -571,8 +689,8 @@ class ResearchResult(BaseModel):
         from_attributes = True
 
 
-class ValidationResult(BaseModel):
-    """Result of schema validation."""
+class SchemaValidationResult(BaseModel):
+    """Result of PartyMap schema validation."""
     
     is_valid: bool = Field(..., description="Whether data meets schema requirements")
     missing_fields: List[str] = Field(
@@ -588,5 +706,4 @@ class ValidationResult(BaseModel):
         ge=0.0,
         le=1.0,
         description="How complete the data is (0.0-1.0)"
-    )
     )

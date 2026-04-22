@@ -4,6 +4,7 @@ import logging
 from typing import Dict, Optional, Any, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
+from src.utils.utc_now import utc_now
 from enum import Enum
 
 logger = logging.getLogger(__name__)
@@ -150,7 +151,7 @@ class PipelineControlManager:
         
         # Reset state
         info.status = PipelineStatus.RUNNING
-        info.started_at = datetime.utcnow()
+        info.started_at = utc_now()
         info.completed_at = None
         info.progress_percentage = 0
         info.current_operation = "Starting..."
@@ -238,7 +239,7 @@ class PipelineControlManager:
         
         info = self._pipelines[pipeline_key]
         info.status = PipelineStatus.IDLE
-        info.completed_at = datetime.utcnow()
+        info.completed_at = utc_now()
         info.current_operation = "Complete"
         info.progress_percentage = 100
         info.stop_requested = False

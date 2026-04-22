@@ -2,6 +2,7 @@
 
 import logging
 from datetime import datetime
+from src.utils.utc_now import utc_now
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
@@ -19,6 +20,7 @@ from src.core.schemas import (
     EventDateData,
     FestivalData,
 )
+from src.services.circuit_breaker import circuit_breaker
 
 logger = logging.getLogger(__name__)
 
@@ -68,12 +70,13 @@ class PartyMapClient:
 
         if self._last_request_time:
             min_interval = 0.5  
-            elapsed = (datetime.utcnow() - self._last_request_time).total_seconds()
+            elapsed = (utc_now() - self._last_request_time).total_seconds()
             if elapsed < min_interval:
                 await asyncio.sleep(min_interval - elapsed)
 
-        self._last_request_time = datetime.utcnow()
+        self._last_request_time = utc_now()
 
+    @circuit_breaker("partymap", failure_threshold=5, recovery_timeout=30.0)
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
@@ -849,8 +852,8 @@ class PartyMapClient:
         """
         from datetime import datetime, timedelta
 
-        start_after = datetime.utcnow().isoformat()
-        start_before = (datetime.utcnow() + timedelta(days=days_ahead)).isoformat()
+        start_after = utc_now().isoformat()
+        start_before = (utc_now() + timedelta(days=days_ahead)).isoformat()
 
         try:
             response = await self._request(
@@ -959,7 +962,7 @@ class PartyMapClient:
             
             # Filter for future dates (or dates without end in past)
             future_dates = []
-            now = datetime.utcnow()
+            now = utc_now()
             
             for date in event_dates:
                 start = date.get("start")
@@ -968,7 +971,7 @@ class PartyMapClient:
                         date_start = datetime.fromisoformat(start.replace('Z', '+00:00'))
                         if date_start > now:
                             future_dates.append(date)
-                    except:
+                    except (ValueError, TypeError):
                         # If can't parse, include it (better safe than sorry)
                         future_dates.append(date)
                 else:

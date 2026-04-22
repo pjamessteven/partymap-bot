@@ -224,37 +224,46 @@ export default function FestivalsPage() {
                 </div>
               </div>
 
-              {sortedFestivals?.map((festival: any) => (
-                <Link
-                  key={festival.id}
-                  href={`/festivals/${festival.id}`}
-                  className="flex items-center justify-between rounded-lg border p-4 hover:bg-muted transition-colors"
-                >
-                  <div className="flex items-center gap-4">
-                    <div
-                      className={`w-3 h-3 rounded-full ${getStateColor(
-                        festival.state
-                      )}`}
-                    />
-                    <div>
-                      <p className="font-medium">{festival.name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        Source: {festival.source} •{' '}
-                        {formatRelativeTime(festival.created_at)}
-                      </p>
+              {sortedFestivals?.map((festival: any) => {
+                const tags = extractTagsFromResearchData(festival.research_data)
+                return (
+                  <Link
+                    key={festival.id}
+                    href={`/festivals/${festival.id}`}
+                    className="flex items-center justify-between rounded-lg border p-4 hover:bg-muted transition-colors"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div
+                        className={`w-3 h-3 rounded-full ${getStateColor(
+                          festival.state
+                        )}`}
+                      />
+                      <div className="min-w-0">
+                        <p className="font-medium">{festival.name}</p>
+                        <p className="text-sm text-muted-foreground">
+                          Source: {festival.source} •{' '}
+                          {formatRelativeTime(festival.created_at)}
+                        </p>
+                        <TagList tags={tags} className="mt-1.5" max={4} />
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    {festival.validation_status && festival.validation_status !== 'pending' && (
-                      <ValidationBadge status={festival.validation_status} showLabel={false} />
-                    )}
-                    {festival.retry_count > 0 && (
-                      <RetryCountBadge count={festival.retry_count} />
-                    )}
-                    <StateBadge state={festival.state} />
-                  </div>
-                </Link>
-              ))}
+                    <div className="flex items-center gap-3 shrink-0">
+                      {festival.validation_status && festival.validation_status !== 'pending' && (
+                        <ValidationBadge status={festival.validation_status} showLabel={false} />
+                      )}
+                      {festival.retry_count > 0 && (
+                        <RetryCountBadge count={festival.retry_count} />
+                      )}
+                      <Badge
+                        variant="secondary"
+                        className={`${getStateColor(festival.state)} text-white`}
+                      >
+                        {getStateLabel(festival.state)}
+                      </Badge>
+                    </div>
+                  </Link>
+                )
+              })}
             </div>
           )}
 

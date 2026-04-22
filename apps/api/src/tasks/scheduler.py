@@ -2,6 +2,7 @@
 
 import logging
 from datetime import datetime, timedelta
+from src.utils.utc_now import utc_now
 from typing import Dict, Optional
 
 from celery import current_app
@@ -25,6 +26,7 @@ class DatabaseScheduler(Scheduler):
         "discovery": "src.tasks.pipeline.discovery_pipeline",
         "goabase_sync": "src.tasks.goabase_sync.goabase_sync_pipeline",
         "cleanup_failed": "src.tasks.maintenance.cleanup_failed",
+        "refresh": "src.tasks.refresh_pipeline.refresh_unconfirmed_dates_task",
     }
 
     # Queue mapping: task_type -> queue name
@@ -32,6 +34,7 @@ class DatabaseScheduler(Scheduler):
         "discovery": "discovery",
         "goabase_sync": "celery",
         "cleanup_failed": "celery",
+        "refresh": "refresh",
     }
 
     def __init__(self, *args, **kwargs):
@@ -70,7 +73,7 @@ class DatabaseScheduler(Scheduler):
                     logger.debug(f"Added schedule: {sched.task_type}")
 
             self._schedule = new_schedule
-            self._last_updated = datetime.utcnow()
+            self._last_updated = utc_now()
 
             logger.info(f"Schedule refreshed: {len(new_schedule)} active tasks")
 
@@ -119,7 +122,7 @@ class DatabaseScheduler(Scheduler):
         # Refresh from DB periodically
         if (
             self._last_updated
-            and (datetime.utcnow() - self._last_updated).seconds > self.UPDATE_INTERVAL
+            and (utc_now() - self._last_updated).seconds > self.UPDATE_INTERVAL
         ):
             self.update_schedule()
 
@@ -131,7 +134,7 @@ class DatabaseScheduler(Scheduler):
         try:
             sched = session.query(PipelineSchedule).filter_by(task_type=task_type).first()
             if sched:
-                sched.last_run_at = datetime.utcnow()
+                sched.last_run_at = utc_now()
                 sched.run_count += 1
                 session.commit()
                 logger.info(f"Updated last_run_at for {task_type}")
@@ -150,7 +153,7 @@ class DatabaseScheduler(Scheduler):
                 return
 
             # Calculate next run time
-            now = datetime.utcnow()
+            now = utc_now()
 
             if sched.day_of_week is not None:
                 # Weekly schedule - find next occurrence of this day

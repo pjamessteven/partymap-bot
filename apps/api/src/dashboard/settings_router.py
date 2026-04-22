@@ -131,7 +131,7 @@ async def _get_setting_by_key(db: AsyncSession, key: str) -> Optional[SystemSett
     return result.scalar_one_or_none()
 
 
-async def _get_setting_value(db: AsyncSession, key: str, default: Any = None) -> Any:
+async def get_setting_value(db: AsyncSession, key: str, default: Any = None) -> Any:
     """Get a setting value by key, returning default if not found.
 
     Args:
@@ -356,7 +356,7 @@ async def get_auto_process_status(
     db: AsyncSession = Depends(get_db),
 ) -> AutoProcessSetting:
     """Get the auto_process setting value."""
-    enabled = await _get_setting_value(db, "auto_process", default=False)
+    enabled = await get_setting_value(db, "auto_process", default=False)
 
     return AutoProcessSetting(
         enabled=bool(enabled),
@@ -471,7 +471,7 @@ async def is_auto_process_enabled(db: AsyncSession) -> bool:
     Returns:
         True if auto_process is enabled, False otherwise
     """
-    return await _get_setting_value(db, "auto_process", default=False)
+    return await get_setting_value(db, "auto_process", default=False)
 
 
 def is_auto_process_enabled_sync(session) -> bool:

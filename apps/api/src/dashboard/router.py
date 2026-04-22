@@ -1,6 +1,8 @@
 """Dashboard API routes."""
 
+import logging
 from datetime import datetime, timedelta
+from src.utils.utc_now import utc_now
 from typing import List, Optional
 from uuid import UUID
 
@@ -18,13 +20,22 @@ from src.core.models import (
     FestivalEventDate,
     FestivalState,
     StateTransition,
+    SystemSettings,
 )
-from src.core.schemas import FestivalPendingAction
+from src.core.schemas import (
+    FestivalAction,
+    FestivalActionRequest,
+    FestivalActionResponse,
+    FestivalActionResult,
+    FestivalPendingAction,
+)
 from src.tasks.celery_app import discovery_pipeline, research_pipeline, sync_pipeline
 from src.tasks.goabase_sync import goabase_sync_pipeline
 from src.core.job_tracker import JobTracker, JobType
 from src.dashboard.schedule_router import router as schedule_router
 from src.dashboard.settings_router import router as settings_router
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -46,21 +57,21 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
         total_festivals += count
 
     # Today's cost
-    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start = utc_now().replace(hour=0, minute=0, second=0, microsecond=0)
     today_cost = await db.execute(
         select(func.sum(CostLog.cost_cents)).where(CostLog.created_at >= today_start)
     )
     today_cost_cents = today_cost.scalar() or 0
 
     # Week cost (last 7 days)
-    week_start = datetime.utcnow() - timedelta(days=7)
+    week_start = utc_now() - timedelta(days=7)
     week_cost = await db.execute(
         select(func.sum(CostLog.cost_cents)).where(CostLog.created_at >= week_start)
     )
     week_cost_cents = week_cost.scalar() or 0
 
     # Month cost (last 30 days)
-    month_start = datetime.utcnow() - timedelta(days=30)
+    month_start = utc_now() - timedelta(days=30)
     month_cost = await db.execute(
         select(func.sum(CostLog.cost_cents)).where(CostLog.created_at >= month_start)
     )
@@ -130,6 +141,7 @@ async def list_festivals(
                 "is_duplicate": f.is_duplicate,
                 "retry_count": f.retry_count,
                 "created_at": f.created_at.isoformat() if f.created_at else None,
+                "research_data": f.research_data,
             }
             for f in festivals
         ],
@@ -279,6 +291,7 @@ async def get_festival(
             }
             for d in decisions
         ],
+        "research_data": festival.research_data,
         "created_at": festival.created_at.isoformat() if festival.created_at else None,
         "updated_at": festival.updated_at.isoformat() if festival.updated_at else None,
     }
@@ -462,7 +475,7 @@ async def get_costs(
     db: AsyncSession = Depends(get_db),
 ):
     """Get cost logs."""
-    from_date = datetime.utcnow() - timedelta(days=days)
+    from_date = utc_now() - timedelta(days=days)
 
     # Get raw cost logs
     result = await db.execute(
@@ -561,17 +574,7 @@ async def delete_query(
 
 # ==================== Manual Festival Action Endpoints ====================
 
-from src.core.schemas import (
-    FestivalAction,
-    FestivalActionRequest,
-    FestivalActionResponse,
-    FestivalActionResult,
-    FestivalPendingAction,
-    FestivalState,
-    DeduplicationResultResponse,
-)
-from src.tasks.pipeline import deduplication_check, research_pipeline, sync_pipeline
-from uuid import UUID
+from src.core.schemas import DeduplicationResultResponse
 
 
 @router.post("/festivals/{festival_id}/deduplicate", response_model=DeduplicationResultResponse)
@@ -752,7 +755,7 @@ async def research_festival(
     # Queue research task
     task = research_pipeline.delay(str(festival_id))
 
-return FestivalActionResponse(
+    return FestivalActionResponse(
         festival_id=festival_id,
         action="research",
         result="queued",
@@ -793,7 +796,7 @@ async def bulk_research_festivals(
         )
     
     # Check daily limit (50 per day as per requirement #4)
-    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start = utc_now().replace(hour=0, minute=0, second=0, microsecond=0)
     
     # Count research tasks queued today
     today_research_count = await _get_today_research_count()
@@ -902,14 +905,11 @@ async def bulk_research_festivals(
 
 async def _get_today_research_count() -> int:
     """Get count of research tasks queued today using Redis."""
-    import redis
-    from datetime import datetime
-    
-    settings = get_settings()
-    redis_client = redis.from_url(settings.redis_url)
-    
-    today_key = f"partymap_bot:daily_research_count:{datetime.utcnow().date().isoformat()}"
-    
+    from src.core.database import get_redis_client
+
+    redis_client = get_redis_client()
+    today_key = f"partymap_bot:daily_research_count:{utc_now().date().isoformat()}"
+
     # Get current count
     count = redis_client.get(today_key)
     return int(count) if count else 0
@@ -917,20 +917,17 @@ async def _get_today_research_count() -> int:
 
 async def _increment_today_research_count(amount: int = 1) -> int:
     """Increment count of research tasks queued today."""
-    import redis
-    from datetime import datetime, timedelta
-    
-    settings = get_settings()
-    redis_client = redis.from_url(settings.redis_url)
-    
-    today_key = f"partymap_bot:daily_research_count:{datetime.utcnow().date().isoformat()}"
-    
+    from src.core.database import get_redis_client
+
+    redis_client = get_redis_client()
+    today_key = f"partymap_bot:daily_research_count:{utc_now().date().isoformat()}"
+
     # Increment and set expiry to 48 hours to handle timezone edge cases
     new_count = redis_client.incrby(today_key, amount)
     if redis_client.ttl(today_key) == -1:  # No expiry set
         # Set expiry to 48 hours
         redis_client.expire(today_key, 48 * 60 * 60)
-    
+
     return new_count
 
 

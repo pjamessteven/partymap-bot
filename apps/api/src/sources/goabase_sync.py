@@ -6,6 +6,7 @@ simple URL matching and modified_date comparison for efficiency.
 
 import logging
 from datetime import datetime
+from src.utils.utc_now import utc_now
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 
@@ -58,13 +59,13 @@ class GoabaseSyncManager:
         """Reset status for new sync operation."""
         self._status = SyncStatus(
             is_running=True,
-            started_at=datetime.utcnow()
+            started_at=utc_now()
         )
     
     def mark_complete(self):
         """Mark sync as complete."""
         self._status.is_running = False
-        self._status.completed_at = datetime.utcnow()
+        self._status.completed_at = utc_now()
         self._status.stop_requested = False
     
     def update_progress(self, current: int, total: int, operation: str):

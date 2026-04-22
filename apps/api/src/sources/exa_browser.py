@@ -4,7 +4,7 @@ import logging
 from typing import List
 
 from src.config import Settings
-from src.core.schemas import DiscoveredFestival, EventDate, ResearchedFestival
+from src.core.schemas import DiscoveredFestival, EventDateData, ResearchedFestival
 from src.research.exa_client import ExaClient
 from src.sources.base import SourceInterface
 
@@ -167,7 +167,7 @@ class ExaBrowserSource(SourceInterface):
         event_dates = []
         for ed in festival_data.event_dates:
             event_dates.append(
-                EventDate(
+                EventDateData(
                     start=ed.start,
                     end=ed.end,
                     location_description=ed.location_description,

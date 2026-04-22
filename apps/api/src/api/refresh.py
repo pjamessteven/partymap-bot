@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 from datetime import datetime, timedelta
+from src.utils.utc_now import utc_now
 
 from src.core.database import get_db
 from src.core.models import RefreshApproval
@@ -117,7 +118,7 @@ async def approve_refresh(
 
     # Update approval
     approval.status = "approved"
-    approval.approved_at = datetime.utcnow()
+    approval.approved_at = utc_now()
     approval.approved_by = "api"  # TODO: Get from auth
     await db.commit()
 
@@ -208,7 +209,7 @@ async def get_refresh_stats(
     recent = await db.execute(
         select(func.count(RefreshApproval.id))
         .where(RefreshApproval.status.in_(["approved", "applied"]))
-        .where(RefreshApproval.created_at >= datetime.utcnow() - timedelta(days=7))
+        .where(RefreshApproval.created_at >= utc_now() - timedelta(days=7))
     )
     recent_count = recent.scalar()
 

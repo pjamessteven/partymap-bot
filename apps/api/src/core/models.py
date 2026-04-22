@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import datetime, timedelta
+from src.utils.utc_now import utc_now
 from enum import Enum as PyEnum
 from typing import List, Optional
 
@@ -49,6 +50,11 @@ class FestivalState(str, PyEnum):
     SYNCING = "syncing"
     SYNCED = "synced"
     
+    # Validation states (NEW)
+    VALIDATING = "validating"
+    VALIDATION_FAILED = "validation_failed"
+    QUARANTINED = "quarantined"
+    
     # End states
     FAILED = "failed"
     SKIPPED = "skipped"
@@ -76,7 +82,7 @@ class Festival(Base):
     state: Mapped[str] = mapped_column(
         String(50), default=FestivalState.DISCOVERED.value, index=True
     )
-    state_changed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    state_changed_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     # Data accumulates as we progress
     discovered_data: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -117,14 +123,35 @@ class Festival(Base):
     failure_reason: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, index=True)
     failure_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     research_completeness_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    
+    # Validation tracking (NEW)
+    validation_status: Mapped[str] = mapped_column(
+        String(20), default="pending"
+    )  # "pending", "ready", "needs_review", "invalid"
+    validation_errors: Mapped[list] = mapped_column(JSON, default=list)
+    validation_warnings: Mapped[list] = mapped_column(JSON, default=list)
+    validation_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    
+    # Enhanced error tracking (NEW)
+    error_category: Mapped[Optional[str]] = mapped_column(
+        String(50), nullable=True
+    )  # "transient", "permanent", "validation", "external", "budget"
+    error_context: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    first_error_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_retry_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    max_retries_reached: Mapped[bool] = mapped_column(Boolean, default=False)
+    
+    # Quarantine tracking (NEW)
+    quarantined_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    quarantine_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Retention
     purge_after: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # Timestamps
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utc_now, onupdate=utc_now
     )
 
     # Current thread tracking for live viewing
@@ -176,9 +203,9 @@ class FestivalEventDate(Base):
     )
 
     # Metadata
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utc_now, onupdate=utc_now
     )
 
     # Relationships
@@ -199,9 +226,9 @@ class DiscoveryQuery(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     priority: Mapped[int] = mapped_column(Integer, default=0)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utc_now, onupdate=utc_now
     )
 
 
@@ -233,7 +260,7 @@ class AgentDecision(Base):
     # Cost
     cost_cents: Mapped[int] = mapped_column(Integer, default=0)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     # Relationships
     festival: Mapped[Optional["Festival"]] = relationship(back_populates="decisions")
@@ -251,7 +278,7 @@ class StateTransition(Base):
     to_state: Mapped[str] = mapped_column(String(50), nullable=False)
     reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     # Relationships
     festival: Mapped["Festival"] = relationship(back_populates="state_history")
@@ -270,7 +297,7 @@ class CostLog(Base):
     cost_cents: Mapped[int] = mapped_column(Integer, default=0)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     # Index for daily cost queries
     __table_args__ = (Index("idx_cost_logs_created_at", "created_at"),)
@@ -295,9 +322,9 @@ class NameMapping(Base):
     # Usage count - how many times this mapping has been used
     use_count: Mapped[int] = mapped_column(Integer, default=1)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utc_now, onupdate=utc_now
     )
 
     # Unique constraint on raw_name
@@ -328,9 +355,9 @@ class PipelineSchedule(Base):
     next_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     run_count: Mapped[int] = mapped_column(Integer, default=0)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utc_now, onupdate=utc_now
     )
 
     # Unique constraint on task_type
@@ -364,9 +391,9 @@ class SystemSettings(Base):
     category: Mapped[str] = mapped_column(String(50), default="general")
     # 'pipeline', 'scheduling', 'cost', 'general'
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utc_now, onupdate=utc_now
     )
 
     # Unique constraint on key
@@ -402,7 +429,7 @@ class JobActivity(Base):
     task_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     # Timestamps
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, index=True)
 
     # Relationships
     festival: Mapped[Optional["Festival"]] = relationship()
@@ -442,9 +469,9 @@ class AgentThread(Base):
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Timestamps
-    started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     # Relationships
     festival: Mapped[Optional["Festival"]] = relationship(back_populates="agent_threads")
@@ -490,7 +517,7 @@ class AgentStreamEvent(Base):
     usage: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)  # {prompt_tokens, completion_tokens, total_tokens}
 
     # Timing
-    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     # Relationships
     thread: Mapped["AgentThread"] = relationship(back_populates="events")
@@ -546,9 +573,9 @@ class RefreshApproval(Base):
     auto_approve_threshold: Mapped[float] = mapped_column(Float, default=0.85)
 
     # Timestamps
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, index=True)
     expires_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.utcnow() + timedelta(days=7)
+        DateTime, default=lambda: utc_now() + timedelta(days=7)
     )  # Expire after 7 days
 
     # Indexes

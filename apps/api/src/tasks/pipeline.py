@@ -2,6 +2,7 @@
 
 import logging
 from datetime import datetime, timedelta
+from src.utils.utc_now import utc_now
 from uuid import UUID
 
 from celery import Celery
@@ -22,6 +23,7 @@ from src.core.models import (
 from src.core.schemas import DiscoveredFestival, EventDateData, ResearchResult, ResearchFailure
 from src.agents.discovery import DiscoveryAgent
 from src.partymap.client import PartyMapClient
+from src.dashboard.settings_router import is_setting_enabled_sync
 
 logger = logging.getLogger(__name__)
 
@@ -113,8 +115,8 @@ def _save_cost_log(
     session.add(cost_log)
 
 
-@celery_app.task
-def discovery_pipeline(manual_query: str = None):
+@celery_app.task(bind=True, max_retries=3)
+def discovery_pipeline(self, manual_query: str = None):
     """
     Run discovery agent.
 
@@ -126,7 +128,10 @@ def discovery_pipeline(manual_query: str = None):
     async def _discover_async():
         """Async part: call discovery agent."""
         agent = DiscoveryAgent(settings)
-        return await agent.discover(manual_query=manual_query)
+        try:
+            return await agent.discover(manual_query=manual_query)
+        finally:
+            await agent.close()
 
     session = SessionLocal()
     try:
@@ -171,13 +176,13 @@ def discovery_pipeline(manual_query: str = None):
     except Exception as e:
         session.rollback()
         logger.error(f"Discovery failed: {e}")
-        raise
+        raise self.retry(exc=e, countdown=60)
     finally:
         session.close()
 
 
-@celery_app.task
-def deduplication_check(festival_id: str):
+@celery_app.task(bind=True, max_retries=3)
+def deduplication_check(self, festival_id: str):
     """
     Check for duplicates BEFORE research.
 
@@ -304,7 +309,7 @@ def deduplication_check(festival_id: str):
     except Exception as e:
         session.rollback()
         logger.error(f"Deduplication failed for {festival_id}: {e}")
-        raise
+        raise self.retry(exc=e, countdown=60)
     finally:
         session.close()
 
@@ -327,7 +332,7 @@ def research_pipeline(self, festival_id: str):
 
         # Check if recently researched
         if festival.state == FestivalState.RESEARCHED:
-            if festival.updated_at and festival.updated_at > datetime.utcnow() - timedelta(days=7):
+            if festival.updated_at and festival.updated_at > utc_now() - timedelta(days=7):
                 logger.info(f"Recently researched, skipping: {festival.name}")
                 
                 # Only auto-sync if auto_sync_on_research_success setting is enabled
@@ -344,7 +349,7 @@ def research_pipeline(self, festival_id: str):
         today_cost = (
             session.execute(
                 select(func.sum(CostLog.cost_cents)).where(
-                    CostLog.created_at >= datetime.utcnow().date()
+                    CostLog.created_at >= utc_now().date()
                 )
             ).scalar()
             or 0
@@ -547,7 +552,7 @@ def research_pipeline(self, festival_id: str):
                 
                 # Check max retries
                 if festival.retry_count >= settings.max_retries:
-                    festival.purge_after = datetime.utcnow() + timedelta(
+                    festival.purge_after = utc_now() + timedelta(
                         days=settings.failed_festival_retention_days
                     )
 
@@ -598,7 +603,7 @@ def research_pipeline(self, festival_id: str):
         
         # Check max retries
         if festival.retry_count >= settings.max_retries:
-            festival.purge_after = datetime.utcnow() + timedelta(
+            festival.purge_after = utc_now() + timedelta(
                 days=settings.failed_festival_retention_days
             )
         
@@ -609,14 +614,19 @@ def research_pipeline(self, festival_id: str):
         session.close()
 
 
-@celery_app.task
-def sync_pipeline(festival_id: str):
+@celery_app.task(bind=True, max_retries=3)
+def sync_pipeline(self, festival_id: str):
     """
-    Sync festival to PartyMap.
+    Sync festival to PartyMap with pre-flight validation.
 
     Uses Event/EventDate separation strategy:
     - Event object: General info only
     - EventDate objects: Date-specific info
+
+    Validation:
+    - Validates festival data before PartyMap sync
+    - Sets state to VALIDATING -> VALIDATION_FAILED or SYNCING -> SYNCED
+    - On sync error: classifies error, increments retry, quarantines if max retries reached
     """
     import asyncio
 
@@ -631,13 +641,74 @@ def sync_pipeline(festival_id: str):
             logger.error(f"No research data for {festival_id}")
             return
 
+        # --- Pre-flight Validation ---
+        from src.core.schemas import FestivalData, DuplicateCheckResult
+        from src.core.validators import PartyMapSyncValidator
+        from src.core.error_classification import ErrorContext, ErrorCategory, categorize_error
+        from src.services.dead_letter_queue import check_and_quarantine
+
+        festival_data = FestivalData(**festival.research_data)
+        validator = PartyMapSyncValidator()
+        validation_result = validator.validate(festival_data)
+
+        # Store validation results
+        festival.validation_status = validation_result.status
+        festival.validation_errors = validation_result.errors
+        festival.validation_warnings = validation_result.warnings
+        festival.validation_checked_at = utc_now()
+
+        if validation_result.status == "invalid":
+            festival.state = FestivalState.VALIDATION_FAILED
+            _log_state_transition(
+                session,
+                festival.id,
+                FestivalState.RESEARCHED,
+                FestivalState.VALIDATION_FAILED,
+                f"Validation failed: {len(validation_result.errors)} errors",
+            )
+            session.commit()
+            logger.warning(
+                f"Festival {festival.name} failed validation: "
+                f"{len(validation_result.errors)} errors, "
+                f"{len(validation_result.warnings)} warnings"
+            )
+            return
+
+        if validation_result.status == "needs_review":
+            festival.state = FestivalState.NEEDS_REVIEW
+            _log_state_transition(
+                session,
+                festival.id,
+                FestivalState.RESEARCHED,
+                FestivalState.NEEDS_REVIEW,
+                f"Validation needs review: {len(validation_result.warnings)} warnings",
+            )
+            session.commit()
+            logger.warning(
+                f"Festival {festival.name} needs review: "
+                f"{len(validation_result.warnings)} warnings"
+            )
+            # In auto-process mode, continue to sync anyway
+            # In manual mode, stop here and wait for human review
+            if not is_setting_enabled_sync(session, "auto_process"):
+                return
+            # Auto-process: continue to sync with warning logged
+            logger.info(f"Auto-process enabled, continuing sync for {festival.name}")
+
+        # Mark as syncing
+        old_state = festival.state
+        festival.state = FestivalState.SYNCING
+        _log_state_transition(
+            session,
+            festival.id,
+            old_state,
+            FestivalState.SYNCING,
+            "Starting PartyMap sync",
+        )
+        session.commit()
+
         async def _sync_async():
             client = PartyMapClient(settings)
-
-            # Reconstruct FestivalData from research_data
-            from src.core.schemas import FestivalData, DuplicateCheckResult
-
-            festival_data = FestivalData(**festival.research_data)
 
             duplicate_check = DuplicateCheckResult(
                 is_duplicate=festival.is_duplicate,
@@ -646,35 +717,98 @@ def sync_pipeline(festival_id: str):
                 date_confirmed=festival.date_confirmed,
             )
 
-            # Sync
+            # Sync with circuit breaker protection
             result = await client.sync_festival(festival_data, duplicate_check)
             await client.close()
             return result
 
         result = asyncio.run(_sync_async())
 
-        # Update festival
+        # Update festival on success
         festival.partymap_event_id = result.get("event_id")
         festival.state = FestivalState.SYNCED
         festival.sync_data = result
+        festival.last_error = None
+        festival.error_category = None
+        festival.error_context = None
+        festival.retry_count = 0
 
         _log_state_transition(
             session,
             festival.id,
-            FestivalState.RESEARCHED,
+            FestivalState.SYNCING,
             FestivalState.SYNCED,
             f"Sync complete: {result.get('action')}",
         )
 
         session.commit()
-
         logger.info(f"Synced {festival.name}: {result}")
 
     except Exception as e:
         session.rollback()
-        logger.error(f"Sync failed for {festival_id}: {e}")
-        # Don't retry sync automatically - may need investigation
-        festival.last_error = f"Sync failed: {e}"
+
+        # Guard against errors before festival was loaded
+        if "festival" not in locals() or festival is None:
+            logger.error(f"Sync failed before festival could be loaded: {e}")
+            session.commit()
+            raise
+
+        # --- Enhanced Error Handling ---
+        error_category = categorize_error(e, service="partymap")
+        error_context = ErrorContext.from_exception(
+            e, category=error_category, service="partymap", operation="sync"
+        )
+
+        festival.last_error = f"[{error_category.value}] {str(e)}"
+        festival.error_category = error_category.value
+        festival.error_context = error_context.to_dict()
+        festival.retry_count = (festival.retry_count or 0) + 1
+
+        if not festival.first_error_at:
+            festival.first_error_at = utc_now()
+        festival.last_retry_at = utc_now()
+
+        # Check if we should quarantine
+        from src.core.models import FestivalState
+        if festival.retry_count >= 5:
+            festival.max_retries_reached = True
+            festival.state = FestivalState.QUARANTINED
+            festival.quarantined_at = utc_now()
+            festival.quarantine_reason = f"Max retries reached after {festival.retry_count} attempts: {str(e)}"
+            _log_state_transition(
+                session,
+                festival.id,
+                FestivalState.SYNCING,
+                FestivalState.QUARANTINED,
+                f"Quarantined: {error_category.value} - {str(e)}",
+            )
+            logger.error(
+                f"Festival {festival.name} quarantined after {festival.retry_count} sync failures"
+            )
+        else:
+            # Retryable error: schedule retry with exponential backoff
+            if error_category in (ErrorCategory.TRANSIENT, ErrorCategory.EXTERNAL, ErrorCategory.UNKNOWN):
+                countdown = min(60 * (2 ** festival.retry_count), 3600)  # 2min, 4min, 8min... cap at 1hr
+                logger.warning(
+                    f"Sync failed for {festival.name} ({error_category.value}), "
+                    f"retrying in {countdown}s (attempt {festival.retry_count}/5)"
+                )
+                session.commit()
+                raise self.retry(exc=e, countdown=countdown)
+            else:
+                # Non-retryable error: mark as failed
+                festival.state = FestivalState.FAILED
+                _log_state_transition(
+                    session,
+                    festival.id,
+                    FestivalState.SYNCING,
+                    FestivalState.FAILED,
+                    f"Sync failed: {error_category.value} - {str(e)}",
+                )
+                logger.error(
+                    f"Sync failed for {festival.name} ({error_category.value}): {e}"
+                )
+
         session.commit()
     finally:
         session.close()

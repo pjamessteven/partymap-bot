@@ -427,12 +427,12 @@ async def evaluator_node(state: ResearchState, config: RunnableConfig) -> dict:
             if collected.get("start"):
                 try:
                     start = parser.parse(collected["start"])
-                except:
+                except (ValueError, TypeError):
                     pass
             if collected.get("end"):
                 try:
                     end = parser.parse(collected["end"])
-                except:
+                except (ValueError, TypeError):
                     pass
 
             # Build EventDateData with enhanced fields

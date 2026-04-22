@@ -46,50 +46,11 @@ echo ""
 echo "Running Alembic migrations..."
 cd /app
 
-# Check if alembic is installed
-if ! python3 -c "import alembic" 2>/dev/null; then
-    echo "Installing alembic..."
-    pip install alembic -q
-fi
-
-# Try to run migrations. If they fail due to existing tables, stamp and continue
-echo "Attempting to run migrations..."
 if alembic upgrade head; then
-    echo "✓ Migrations completed successfully!"
+    echo "Migrations completed successfully!"
 else
-    echo "Migration failed. Checking if database already has tables..."
-    
-    # Check if festivals table exists (meaning DB was already set up)
-    TABLE_COUNT=$(python3 << 'EOF' 2>/dev/null
-import asyncio
-import sys
-sys.path.insert(0, '/app/src')
-from sqlalchemy import text
-from src.core.database import engine
-import logging
-logging.disable(logging.INFO)
-
-async def check():
-    async with engine.connect() as conn:
-        try:
-            result = await conn.execute(text("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public'"))
-            count = result.scalar()
-            print(count, end='')
-        except Exception as e:
-            print("0", end='')
-
-asyncio.run(check())
-EOF
-)
-    
-    if [ "$TABLE_COUNT" -gt "0" ]; then
-        echo "Database has $TABLE_COUNT existing tables. Stamping with current migration version..."
-        alembic stamp head || echo "WARNING: Failed to stamp database"
-        echo "✓ Database stamped. Continuing..."
-    else
-        echo "ERROR: Database is empty but migrations failed"
-        exit 1
-    fi
+    echo "ERROR: Migrations failed"
+    exit 1
 fi
 
 echo ""

@@ -3,10 +3,11 @@
 import json
 import logging
 from datetime import datetime
+from src.utils.utc_now import utc_now
 from enum import Enum
 from typing import Dict, Optional, List
 
-from src.core.database import redis_client
+from src.core.database import get_redis_client
 from src.core.job_activity import JobActivityLogger
 
 logger = logging.getLogger(__name__)
@@ -53,7 +54,7 @@ class JobTracker:
         data = {
             "status": JobStatus.RUNNING.value,
             "task_id": task_id,
-            "started_at": datetime.utcnow().isoformat(),
+            "started_at": utc_now().isoformat(),
             "metadata": metadata or {},
             "progress": {
                 "current": 0,
@@ -62,7 +63,7 @@ class JobTracker:
             },
             "currently_processing": [],  # List of festival IDs being processed
         }
-        redis_client.set(cls._key(job_type), json.dumps(data))
+        get_redis_client().set(cls._key(job_type), json.dumps(data))
         logger.info(f"Job {job_type.value} started: {task_id}")
 
         # Log to database
@@ -83,7 +84,7 @@ class JobTracker:
     ) -> None:
         """Update job progress."""
         key = cls._key(job_type)
-        existing = redis_client.get(key)
+        existing = get_redis_client().get(key)
         if existing:
             data = json.loads(existing)
             data["progress"] = {
@@ -98,11 +99,11 @@ class JobTracker:
                 processing.append({
                     "id": festival_id,
                     "name": festival_name or "Unknown",
-                    "started_at": datetime.utcnow().isoformat(),
+                    "started_at": utc_now().isoformat(),
                 })
                 data["currently_processing"] = processing
 
-            redis_client.set(key, json.dumps(data))
+            get_redis_client().set(key, json.dumps(data))
 
     @classmethod
     async def mark_festival_complete(
@@ -112,14 +113,14 @@ class JobTracker:
     ) -> None:
         """Mark a festival as completed and remove from processing list."""
         key = cls._key(job_type)
-        existing = redis_client.get(key)
+        existing = get_redis_client().get(key)
         if existing:
             data = json.loads(existing)
             processing = data.get("currently_processing", [])
             data["currently_processing"] = [
                 p for p in processing if p.get("id") != festival_id
             ]
-            redis_client.set(key, json.dumps(data))
+            get_redis_client().set(key, json.dumps(data))
 
     @classmethod
     async def complete_job(
@@ -129,14 +130,14 @@ class JobTracker:
     ) -> None:
         """Mark a job as completed."""
         key = cls._key(job_type)
-        existing = redis_client.get(key)
+        existing = get_redis_client().get(key)
         if existing:
             data = json.loads(existing)
             data["status"] = JobStatus.COMPLETED.value
-            data["completed_at"] = datetime.utcnow().isoformat()
+            data["completed_at"] = utc_now().isoformat()
             data["result"] = result or {}
             data["currently_processing"] = []
-            redis_client.set(key, json.dumps(data))
+            get_redis_client().set(key, json.dumps(data))
             logger.info(f"Job {job_type.value} completed")
 
             # Log to database
@@ -155,13 +156,13 @@ class JobTracker:
     ) -> None:
         """Mark a job as failed."""
         key = cls._key(job_type)
-        existing = redis_client.get(key)
+        existing = get_redis_client().get(key)
         if existing:
             data = json.loads(existing)
             data["status"] = JobStatus.FAILED.value
-            data["failed_at"] = datetime.utcnow().isoformat()
+            data["failed_at"] = utc_now().isoformat()
             data["error"] = error
-            redis_client.set(key, json.dumps(data))
+            get_redis_client().set(key, json.dumps(data))
             logger.info(f"Job {job_type.value} failed: {error}")
 
             # Log to database
@@ -175,14 +176,14 @@ class JobTracker:
     async def stop_job(cls, job_type: JobType) -> bool:
         """Mark a job as stopped (for stopping running jobs)."""
         key = cls._key(job_type)
-        existing = redis_client.get(key)
+        existing = get_redis_client().get(key)
         if existing:
             data = json.loads(existing)
             if data.get("status") == JobStatus.RUNNING.value:
                 data["status"] = JobStatus.STOPPED.value
-                data["stopped_at"] = datetime.utcnow().isoformat()
+                data["stopped_at"] = utc_now().isoformat()
                 data["currently_processing"] = []
-                redis_client.set(key, json.dumps(data))
+                get_redis_client().set(key, json.dumps(data))
                 logger.info(f"Job {job_type.value} stopped")
 
                 # Log to database
@@ -198,7 +199,7 @@ class JobTracker:
     def get_status(cls, job_type: JobType) -> Optional[Dict]:
         """Get current job status."""
         key = cls._key(job_type)
-        data = redis_client.get(key)
+        data = get_redis_client().get(key)
         if data:
             return json.loads(data)
         return None
@@ -217,13 +218,13 @@ class JobTracker:
     @classmethod
     def clear_job(cls, job_type: JobType) -> None:
         """Clear job status."""
-        redis_client.delete(cls._key(job_type))
+        get_redis_client().delete(cls._key(job_type))
 
     @classmethod
     def clear_all_jobs(cls) -> None:
         """Clear all job statuses."""
         for job_type in JobType:
-            redis_client.delete(cls._key(job_type))
+            get_redis_client().delete(cls._key(job_type))
 
     @classmethod
     def get_processing_festivals(cls, job_type: JobType) -> List[Dict]:

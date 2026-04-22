@@ -14,6 +14,7 @@ from tenacity import (
 
 from src.config import Settings
 from src.core.schemas import DiscoveredFestival
+from src.services.circuit_breaker import circuit_breaker
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,7 @@ class ExaClient:
         """Close HTTP client."""
         await self.client.aclose()
 
+    @circuit_breaker("exa", failure_threshold=5, recovery_timeout=30.0)
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
@@ -134,6 +136,7 @@ class ExaClient:
             logger.error(f"Exa search failed: {e}")
             raise
 
+    @circuit_breaker("exa", failure_threshold=5, recovery_timeout=30.0)
     async def find_similar(self, url: str, num_results: int = 5) -> List[ExaResult]:
         """Find similar pages to a given URL."""
         try:
@@ -259,6 +262,7 @@ class ExaClient:
 
         return name
 
+    @circuit_breaker("exa", failure_threshold=5, recovery_timeout=30.0)
     async def get_page_content(self, url: str) -> Optional[str]:
         """Get full text content of a page."""
         try:

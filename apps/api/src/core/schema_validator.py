@@ -110,7 +110,7 @@ class PartyMapSchemaValidator:
         try:
             result = urlparse(str(url))
             return all([result.scheme, result.netloc])
-        except:
+        except ValueError:
             return False
     
     def generate_failure_message(self, failure_reason: str, missing_fields: List[str]) -> str:

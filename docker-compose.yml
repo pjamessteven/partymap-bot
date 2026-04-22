@@ -16,6 +16,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
@@ -28,6 +29,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    restart: unless-stopped
 
   api:
     build:
@@ -45,16 +47,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    volumes:
-      - ./apps/api/src:/app/src
-      - ./apps/api/entrypoint.sh:/app/entrypoint.sh
-    entrypoint: ["/app/entrypoint.sh"]
-    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   worker:
     build:
@@ -72,11 +70,14 @@ services:
         condition: service_healthy
       api:
         condition: service_started
-    volumes:
-      - ./apps/api/src:/app/src
-      - ./apps/api/entrypoint.sh:/app/entrypoint.sh
-    entrypoint: ["/app/entrypoint.sh"]
     command: celery -A src.tasks.celery_app worker -l info -Q celery,discovery,dedup,research,sync -c 3
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A src.tasks.celery_app inspect ping --destination celery@$$HOSTNAME || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
 
   scheduler:
     build:
@@ -94,11 +95,14 @@ services:
         condition: service_healthy
       api:
         condition: service_started
-    volumes:
-      - ./apps/api/src:/app/src
-      - ./apps/api/entrypoint.sh:/app/entrypoint.sh
-    entrypoint: ["/app/entrypoint.sh"]
     command: celery -A src.tasks.celery_app beat -l info --scheduler src.tasks.scheduler:DatabaseScheduler
+    healthcheck:
+      test: ["CMD-SHELL", "ps aux | grep 'celery beat' | grep -v grep || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
 
   web:
     build:

@@ -11,7 +11,7 @@ celery_app = Celery(
     "partymap_bot",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["src.tasks.pipeline", "src.tasks.goabase_sync", "src.tasks.maintenance"],
+    include=["src.tasks.pipeline", "src.tasks.goabase_sync", "src.tasks.maintenance", "src.tasks.refresh_pipeline"],
 )
 
 # Configure Celery
@@ -32,6 +32,9 @@ celery_app.conf.update(
         "src.tasks.pipeline.sync_pipeline": {"queue": "sync"},
         "src.tasks.goabase_sync.goabase_sync_pipeline": {"queue": "celery"},
         "src.tasks.maintenance.cleanup_failed": {"queue": "celery"},
+        "src.tasks.refresh_pipeline.refresh_unconfirmed_dates_task": {"queue": "refresh"},
+        "src.tasks.refresh_pipeline.refresh_festival_date_task": {"queue": "refresh"},
+        "src.tasks.refresh_pipeline.apply_approved_refresh_task": {"queue": "refresh"},
     },
     # Use custom database scheduler - schedule is read from database
     beat_scheduler="src.tasks.scheduler:DatabaseScheduler",

@@ -44,8 +44,13 @@ class DiscoveryAgent:
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit."""
+        await self.close()
+
+    async def close(self):
+        """Close any open clients."""
         if self.exa:
             await self.exa.close()
+            self.exa = None
 
     async def discover(self, manual_query: Optional[str] = None) -> List[DiscoveredFestival]:
         """
@@ -234,7 +239,7 @@ class DiscoveryAgent:
 
             # Update last_used timestamp
             for query in queries:
-                query.last_used = datetime.utcnow()
+                query.last_used = utc_now()
 
             await session.commit()
 
@@ -378,3 +383,4 @@ class DiscoveryAgent:
 
 
 from datetime import datetime
+from src.utils.utc_now import utc_now

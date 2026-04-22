@@ -9,41 +9,129 @@ partymap-bot/
 ├── apps/
 │   ├── api/           # Python FastAPI backend
 │   └── web/           # Next.js frontend
-├── docker-compose.yml # Docker orchestration
+├── docker-compose.yml      # Production Docker orchestration
+├── docker-compose.dev.yml  # Development overrides (hot reload)
 └── package.json       # Root workspace config
 ```
 
-## Quick Start
+## Quick Start with Docker
 
 ### Prerequisites
 
 - Docker and Docker Compose
-- Node.js 20+ (for local development)
-- Python 3.12+ (for local development)
 
-### Running with Docker
+### 1. Create environment file
 
 ```bash
-# Start all services
-docker-compose up -d
-
-# DEV
-
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml build --no-cache web
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
-
-# Initialize the database
-docker-compose exec api python scripts/init_db.py
-
-# View logs
-docker-compose logs -f
-
-# Access the services:
-# - Web UI: http://localhost:3000
-# - API Docs: http://localhost:8000/docs
+cp .env.example .env
+# Edit .env and add your API keys:
+# OPENROUTER_API_KEY=your_key_here
+# EXA_API_KEY=your_key_here
 ```
 
-### Services
+### 2. Start all services (Development)
+
+```bash
+# Start with hot reload for development
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+
+# Or start and view logs directly
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+```
+
+### 3. Verify services are running
+
+```bash
+# Check container status
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml ps
+
+# View API logs
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs -f api
+
+# View web logs
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs -f web
+```
+
+### 4. Access the services
+
+| Service | URL | Description |
+|---------|-----|-------------|
+| Web UI | http://localhost:3000 | Next.js frontend dashboard |
+| API Docs | http://localhost:8000/docs | FastAPI Swagger UI |
+| API Redoc | http://localhost:8000/redoc | FastAPI ReDoc |
+| Database | localhost:5438 | PostgreSQL (direct access) |
+| Redis | localhost:6379 | Redis (direct access) |
+
+### 5. Stop services
+
+```bash
+# Stop all services
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml down
+
+# Stop and remove volumes (clears database data)
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml down -v
+```
+
+## Common Docker Commands
+
+### Running Migrations
+
+Migrations run automatically when containers start. To run manually:
+
+```bash
+# Run pending migrations
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec api alembic upgrade head
+
+# Check current migration version
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec api alembic current
+
+# Rollback one migration
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec api alembic downgrade -1
+
+# Create new migration (with autogenerate)
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec api alembic revision --autogenerate -m "description"
+```
+
+### Rebuilding Containers
+
+```bash
+# Rebuild all containers
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml build
+
+# Rebuild specific service
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml build api
+
+# Rebuild and restart
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+```
+
+### Executing Commands in Containers
+
+```bash
+# Open Python shell in API container
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec api python
+
+# Open database shell
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec db psql -U partymap -d partymap_bot
+
+# Install new Python dependency
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec api pip install <package>
+
+# Run API tests
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec api pytest
+```
+
+### Restarting Services
+
+```bash
+# Restart all services
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml restart
+
+# Restart specific service
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml restart api
+```
+
+## Services
 
 | Service   | Port | Description                |
 | --------- | ---- | -------------------------- |
@@ -79,6 +167,7 @@ Create a `.env` file in the root directory:
 ```bash
 OPENROUTER_API_KEY=your_key_here
 EXA_API_KEY=your_key_here
+PARTYMAP_API_KEY=your_key_here
 ```
 
 ## API Documentation

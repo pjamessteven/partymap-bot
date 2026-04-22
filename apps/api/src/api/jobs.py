@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, HTTPExce
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 from datetime import datetime
+from src.utils.utc_now import utc_now
 
 from src.core.database import get_db
 from src.core.job_tracker import JobTracker, JobType, JobStatus
@@ -29,7 +30,7 @@ async def broadcast_job_update(job_type: str, data: dict):
         "type": "job_update",
         "job_type": job_type,
         "data": data,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": utc_now().isoformat(),
     }
 
     # Broadcast via Redis for multi-instance support
@@ -41,7 +42,7 @@ async def broadcast_job_update(job_type: str, data: dict):
     for ws in _job_websockets:
         try:
             await ws.send_json(message)
-        except:
+        except Exception:
             disconnected.append(ws)
 
     # Clean up disconnected clients
@@ -474,7 +475,7 @@ async def jobs_websocket(websocket: WebSocket):
     async def on_job_update(data: dict):
         try:
             await websocket.send_json(data)
-        except:
+        except Exception:
             pass
 
     # Subscribe to all job channels

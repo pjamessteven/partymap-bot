@@ -1,13 +1,44 @@
-FROM python:3.12-slim
+# Multi-stage build for Python FastAPI backend
+# Stage 1: Builder - installs build deps and compiles Python packages
+# Stage 2: Runtime - minimal image with only runtime deps
+
+# =============================================================================
+# STAGE 1: Builder
+# =============================================================================
+FROM python:3.12-slim AS builder
 
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create virtual environment
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install Python dependencies into venv
+COPY pyproject.toml .
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -e "."
+
+# Install Playwright browsers into venv
+RUN playwright install chromium
+
+# =============================================================================
+# STAGE 2: Runtime
+# =============================================================================
+FROM python:3.12-slim AS runtime
+
+WORKDIR /app
+
+# Install runtime system dependencies (no gcc/build tools)
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
-    # Playwright dependencies
+    libpq5 \
+    # Playwright runtime dependencies
     libglib2.0-0 \
     libnss3 \
     libnspr4 \
@@ -27,9 +58,9 @@ RUN apt-get update && apt-get install -y \
     libasound2 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-COPY pyproject.toml .
-RUN pip install --no-cache-dir -e "."
+# Copy virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
 # Copy application code
 COPY src/ ./src/
@@ -42,24 +73,13 @@ COPY migrate.sh .
 # Create non-root user
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 
-# Install Playwright browsers as appuser
-USER appuser
-RUN playwright install chromium
+# Copy and set up entrypoint script
+COPY --chown=appuser:appuser entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
-# Switch back to root for deps installation
-USER root
-RUN playwright install-deps chromium
-
-# Switch back to appuser for runtime
 USER appuser
 
 EXPOSE 8000
-
-# Copy and set up entrypoint script
-COPY --chown=appuser:appuser entrypoint.sh /app/entrypoint.sh
-USER root
-RUN chmod +x /app/entrypoint.sh
-USER appuser
 
 ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]

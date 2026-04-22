@@ -12,8 +12,17 @@ from src.core.models import Base
 
 settings = get_settings()
 
-# Create Redis client for job tracking
-redis_client = redis.from_url(settings.redis_url, decode_responses=True)
+# Lazy-initialized Redis client (initialized on first use)
+_redis_client: redis.Redis | None = None
+
+
+def get_redis_client() -> redis.Redis:
+    """Get or create the shared Redis client."""
+    global _redis_client
+    if _redis_client is None:
+        _redis_client = redis.from_url(settings.redis_url, decode_responses=True)
+    return _redis_client
+
 
 # Create async engine (for FastAPI)
 engine = create_async_engine(
@@ -90,3 +99,21 @@ async def drop_db() -> None:
 def get_sync_connection_string() -> str:
     """Get sync database connection string for LangGraph checkpointer."""
     return settings.database_url.replace("postgresql+asyncpg", "postgresql")
+
+
+# Lazy-initialized LangGraph Postgres checkpointer
+_postgres_checkpointer = None
+
+
+def get_postgres_checkpointer():
+    """Get or create a PostgresSaver checkpointer for LangGraph."""
+    global _postgres_checkpointer
+    if _postgres_checkpointer is None:
+        import psycopg
+        from langgraph.checkpoint.postgres import PostgresSaver
+
+        conn_string = get_sync_connection_string()
+        conn = psycopg.connect(conn_string)
+        _postgres_checkpointer = PostgresSaver(conn)
+        _postgres_checkpointer.setup()
+    return _postgres_checkpointer

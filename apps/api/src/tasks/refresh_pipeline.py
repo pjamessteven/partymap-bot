@@ -10,6 +10,7 @@ This pipeline:
 import asyncio
 import logging
 from datetime import datetime, timedelta
+from src.utils.utc_now import utc_now
 from typing import Optional
 
 from celery import shared_task
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 @shared_task(bind=True, max_retries=3)
-def refresh_unconfirmed_dates_task(self, months_ahead: int = 4):
+def refresh_unconfirmed_dates_task(self, days_ahead: int = 120):
     """
     Main task to find and refresh unconfirmed EventDates.
 
@@ -64,14 +65,14 @@ def refresh_unconfirmed_dates_task(self, months_ahead: int = 4):
 
                 try:
                     start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
-                    days_until = (start_dt - datetime.utcnow()).days
+                    days_until = (start_dt - utc_now()).days
 
                     if days_until <= 30:
                         # Too close, should be cancelled
                         to_cancel.append(event_date)
                     else:
                         to_refresh.append(event_date)
-                except:
+                except (ValueError, TypeError):
                     continue
 
             # Cancel events 30 days out
@@ -298,9 +299,30 @@ def apply_approved_refresh_task(approval_id: str):
             async with PartyMapClient(settings) as client:
                 # Apply event changes
                 if approval.proposed_changes.get("event"):
+                    event_changes = approval.proposed_changes["event"]
+                    # Convert dict to FestivalData if needed
+                    if isinstance(event_changes, dict):
+                        from src.core.schemas import FestivalData
+                        try:
+                            festival_data = FestivalData(**event_changes)
+                        except Exception:
+                            # Partial data - build FestivalData with minimal required fields
+                            extra_fields = {}
+                            for k, v in event_changes.items():
+                                if k not in ("name", "description", "full_description", "event_dates"):
+                                    extra_fields[k] = v
+                            festival_data = FestivalData(
+                                name=event_changes.get("name", approval.event_name or "Unknown"),
+                                description=event_changes.get("description", ""),
+                                full_description=event_changes.get("full_description", ""),
+                                event_dates=[],
+                                **extra_fields
+                            )
+                    else:
+                        festival_data = event_changes
                     await client.update_event_by_id(
                         approval.event_id,
-                        approval.proposed_changes["event"],
+                        festival_data,
                         message="Updated via refresh pipeline",
                     )
 

@@ -1,8 +1,9 @@
 """Mappers for transforming festival data to PartyMap format."""
 
+from datetime import datetime
 from typing import List, Optional
 
-from src.core.schemas import EventDate, MediaItem, ResearchedFestival, TicketInfo, FestivalData
+from src.core.schemas import EventDateData, MediaItem, ResearchedFestival, TicketInfo, FestivalData
 
 
 class FestivalMapper:
@@ -226,12 +227,12 @@ class GoabaseMapper:
             from dateutil import parser
 
             event_dates.append(
-                EventDate(
+                EventDateData(
                     start=parser.parse(start_date),
                     end=parser.parse(end_date) if end_date else None,
                     location_description=location_desc,
                     lineup=GoabaseMapper._parse_lineup(jsonld_data.get("performers", "")),
-                    url=jsonld_data.get("url", ""),
+                    ticket_url=jsonld_data.get("url", ""),
                 )
             )
 

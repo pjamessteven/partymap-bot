@@ -2,6 +2,7 @@
 
 import logging
 from datetime import datetime, timedelta
+from src.utils.utc_now import utc_now
 from typing import List, Optional
 from uuid import UUID
 
@@ -214,7 +215,7 @@ async def update_schedule(
 
     # Recalculate next_run_at if enabled and schedule changed
     if schedule.enabled:
-        now = datetime.utcnow()
+        now = utc_now()
         if schedule.day_of_week is not None:
             # Weekly schedule
             days_ahead = schedule.day_of_week - now.weekday()
@@ -275,7 +276,7 @@ async def enable_schedule(task_type: str, db: AsyncSession = Depends(get_db)):
     schedule.enabled = True
 
     # Calculate next run
-    now = datetime.utcnow()
+    now = utc_now()
     if schedule.day_of_week is not None:
         days_ahead = schedule.day_of_week - now.weekday()
         if days_ahead <= 0:
@@ -370,7 +371,7 @@ async def apply_schedule_changes():
 
         return ScheduleApplyResponse(
             message="Schedule changes applied. Scheduler will pick up changes within 60 seconds.",
-            refreshed_at=datetime.utcnow(),
+            refreshed_at=utc_now(),
             active_schedules=active_count,
         )
     except Exception as e:

@@ -1,7 +1,7 @@
 """Tools for the refresh agent."""
 
 import json
-from typing import Optional
+from typing import Any, Optional
 from langchain.tools import BaseTool
 from pydantic import BaseModel, Field
 

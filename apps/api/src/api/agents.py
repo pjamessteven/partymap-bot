@@ -6,7 +6,8 @@ import asyncio
 import logging
 from typing import Optional, AsyncGenerator
 from datetime import datetime
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, HTTPException, Query
+from src.utils.utc_now import utc_now
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
@@ -22,6 +23,17 @@ from src.core.models import AgentThread, AgentStreamEvent, Festival
 from src.config import get_settings
 
 router = APIRouter()
+
+# Track running background tasks for graceful cleanup
+_running_tasks: set[asyncio.Task] = set()
+
+
+def _track_background_task(coro) -> asyncio.Task:
+    """Create a background task and track it for cleanup."""
+    task = asyncio.create_task(coro)
+    _running_tasks.add(task)
+    task.add_done_callback(_running_tasks.discard)
+    return task
 
 
 @router.post("/agents/{festival_id}/research/start")
@@ -53,7 +65,7 @@ async def start_research_agent(
     )
 
     # Start graph in background (non-blocking)
-    asyncio.create_task(
+    _track_background_task(
         _run_research_graph(
             thread_id=thread_id,
             festival_id=festival_id,
@@ -133,25 +145,43 @@ async def _run_research_graph(
             ),
         }
 
-        # Run graph with streaming
+        # Run graph with streaming — broadcast in LangGraph-compatible format
         async for event in graph.astream(
             initial_state,
             config=config,
-            stream_mode=["updates", "messages", "tools", "custom"],
+            stream_mode=["updates", "messages", "custom"],
         ):
-            # Broadcast to all connected clients
-            await broadcaster.broadcast(
-                thread_id, {"type": "stream_event", "event": event}
-            )
+            # event is a tuple: (mode, payload)
+            mode, payload = event
+
+            if mode == "messages":
+                chunk, metadata = payload
+                await broadcaster.broadcast(
+                    thread_id,
+                    {
+                        "event": "messages",
+                        "data": [message_to_dict(chunk), metadata],
+                    },
+                )
+            elif mode == "updates":
+                await broadcaster.broadcast(
+                    thread_id,
+                    {"event": "updates", "data": payload},
+                )
+            elif mode == "custom":
+                await broadcaster.broadcast(
+                    thread_id,
+                    {"event": "custom", "data": payload},
+                )
 
         # Final success broadcast
         await broadcaster.broadcast(
-            thread_id, {"type": "stream_complete", "status": "success"}
+            thread_id, {"event": "end", "data": {"status": "success"}}
         )
 
     except Exception as e:
         await broadcaster.broadcast(
-            thread_id, {"type": "stream_error", "error": str(e)}
+            thread_id, {"event": "error", "data": {"error": str(e)}}
         )
         raise
     finally:
@@ -161,41 +191,6 @@ async def _run_research_graph(
         await partymap.close()
         await musicbrainz.close()
         await vision.close()
-
-
-@router.websocket("/agents/{thread_id}/ws")
-async def agent_websocket(websocket: WebSocket, thread_id: str):
-    """
-    WebSocket endpoint for real-time stream viewing.
-    Supports multiple concurrent viewers of the same stream.
-    """
-    await websocket.accept()
-
-    # Get broadcaster
-    broadcaster = await get_broadcaster()
-
-    # Callback to forward events to this WebSocket
-    async def on_event(event: dict):
-        try:
-            await websocket.send_json(event)
-        except:
-            pass  # Client disconnected
-
-    # Subscribe to thread
-    await broadcaster.subscribe(thread_id, on_event)
-
-    try:
-        # Keep connection alive and handle client messages
-        while True:
-            message = await websocket.receive_text()
-            data = json.loads(message)
-            if data.get("action") == "stop":
-                # Handle stop request
-                pass
-    except WebSocketDisconnect:
-        pass
-    finally:
-        await broadcaster.unsubscribe(thread_id, on_event)
 
 
 @router.get("/agents/{thread_id}/events")
@@ -388,9 +383,14 @@ async def stream_run(
         
         # Replay historical events in LangGraph format
         for event in historical_events:
-            langgraph_event = _convert_to_langgraph_event(event, modes)
-            if langgraph_event:
-                yield f"event: {langgraph_event['event']}\ndata: {json.dumps(langgraph_event['data'])}\n\n"
+            langgraph_events = _convert_to_langgraph_event(event, modes)
+            if langgraph_events:
+                # messages events may produce multiple SSE events (one per buffered chunk)
+                if isinstance(langgraph_events, list):
+                    for lg_event in langgraph_events:
+                        yield f"event: {lg_event['event']}\ndata: {json.dumps(lg_event['data'])}\n\n"
+                else:
+                    yield f"event: {langgraph_events['event']}\ndata: {json.dumps(langgraph_events['data'])}\n\n"
         
         # If thread is still running, subscribe to live updates
         if thread.status == "running":
@@ -401,7 +401,7 @@ async def stream_run(
                 # Use asyncio.create_task to safely add to queue from sync callback
                 try:
                     asyncio.get_event_loop().create_task(event_queue.put(data))
-                except:
+                except RuntimeError:
                     pass
             
             # Subscribe to live updates
@@ -429,7 +429,7 @@ async def stream_run(
                             
                     except asyncio.TimeoutError:
                         # Send keepalive
-                        yield f"event: ping\ndata: {json.dumps({'timestamp': datetime.utcnow().isoformat()})}\n\n"
+                        yield f"event: ping\ndata: {json.dumps({'timestamp': utc_now().isoformat()})}\n\n"
                         
             finally:
                 await broadcaster.unsubscribe(thread_id, on_live_event)
@@ -450,33 +450,39 @@ async def stream_run(
 
 def _convert_to_langgraph_event(event: AgentStreamEvent, modes: set) -> Optional[dict]:
     """Convert stored AgentStreamEvent to LangGraph SSE format."""
-    
-    # Map internal event types to LangGraph events
+
+    # Message chunks — stored as {"items": [{"chunk": dict, "metadata": dict}, ...]}
     if event.event_type == "messages" and "messages" in modes:
-        return {
-            "event": "messages",
-            "data": {
-                "event": "on_chat_model_stream",
-                "data": {
-                    "chunk": event.event_data,
-                },
-                "run_id": event.run_id,
-            }
+        items = event.event_data.get("items", [])
+        # Each item is a LangGraph messages-tuple: [chunk_dict, metadata_dict]
+        results = []
+        for item in items:
+            chunk = item.get("chunk")
+            metadata = item.get("metadata", {})
+            if chunk:
+                results.append({"event": "messages", "data": [chunk, metadata]})
+        return results if results else None
+
+    # Tool lifecycle events — emit as "tools" for SDK toolProgress tracking
+    if event.event_type == "tools" and "tools" in modes:
+        tool_event_name = event.event_data.get("event", "on_tool_start")
+        state_map = {
+            "on_tool_start": "starting",
+            "on_tool_call": "starting",
+            "on_tool_end": "completed",
         }
-    
-    elif event.event_type == "tools" and "updates" in modes:
-        tool_event = event.event_data.get("event", "on_tool_start")
-        return {
-            "event": "updates",
-            "data": {
-                "event": tool_event,
-                "name": event.tool_name or event.event_data.get("name"),
-                "data": event.event_data,
-                "run_id": event.run_id,
-            }
+        tool_data = {
+            "toolCallId": event.tool_call_id or event.run_id,
+            "name": event.tool_name or event.event_data.get("name", "unknown"),
+            "state": state_map.get(tool_event_name, "running"),
+            "input": event.event_data.get("input"),
+            "result": event.event_data.get("output"),
+            "data": event.event_data,
         }
-    
-    elif event.event_type in ("reasoning", "evaluation") and "custom" in modes:
+        return {"event": "tools", "data": tool_data}
+
+    # Custom writer events (reasoning, evaluation, tool_progress)
+    if event.event_type in ("reasoning", "evaluation", "tool_progress") and "custom" in modes:
         return {
             "event": "custom",
             "data": {
@@ -485,63 +491,41 @@ def _convert_to_langgraph_event(event: AgentStreamEvent, modes: set) -> Optional
                 "timestamp": event.timestamp.isoformat() if event.timestamp else None,
             }
         }
-    
-    elif event.event_type == "chain_start" and "debug" in modes:
+
+    # Chain lifecycle → metadata
+    if event.event_type in ("chain_start", "chain_end"):
         return {
-            "event": "debug",
+            "event": "metadata",
             "data": {
-                "type": "chain_start",
+                "run_id": event.run_id,
+                "event_type": event.event_type,
                 "timestamp": event.timestamp.isoformat() if event.timestamp else None,
             }
         }
-    
-    elif event.event_type == "chain_end" and "debug" in modes:
-        return {
-            "event": "debug",
-            "data": {
-                "type": "chain_end",
-                "timestamp": event.timestamp.isoformat() if event.timestamp else None,
-            }
-        }
-    
+
     return None
 
 
 def _convert_live_event_to_langgraph(live_data: dict, modes: set) -> Optional[dict]:
-    """Convert live broadcast event to LangGraph SSE format."""
-    event_data = live_data.get("event", {})
-    
-    # Already in LangGraph format from graph.astream
-    if isinstance(event_data, tuple) and len(event_data) >= 2:
-        event_type, data = event_data[0], event_data[1]
-        
-        if event_type == "messages" and "messages" in modes:
-            return {
-                "event": "messages",
-                "data": {
-                    "event": "on_chat_model_stream",
-                    "data": {"chunk": data},
-                }
-            }
-        elif event_type == "updates" and "updates" in modes:
-            return {
-                "event": "updates",
-                "data": data,
-            }
-        elif event_type == "tools" and "updates" in modes:
-            return {
-                "event": "updates",
-                "data": {
-                    "event": "on_tool_call",
-                    "data": data,
-                }
-            }
-        elif event_type == "custom" and "custom" in modes:
-            return {
-                "event": "custom",
-                "data": data,
-            }
-    
+    """Convert live broadcast event to LangGraph SSE format.
+
+    Live events are already in LangGraph format from _run_research_graph.
+    We just need to filter by requested stream modes.
+    """
+    event_name = live_data.get("event")
+    data = live_data.get("data")
+
+    if event_name == "messages" and "messages" in modes:
+        return {"event": "messages", "data": data}
+    if event_name == "updates" and "updates" in modes:
+        return {"event": "updates", "data": data}
+    if event_name == "custom" and "custom" in modes:
+        return {"event": "custom", "data": data}
+    if event_name == "tools" and "tools" in modes:
+        return {"event": "tools", "data": data}
+    if event_name in ("end", "error", "metadata"):
+        return live_data  # Pass through lifecycle events
+
     return None
 
 
@@ -586,7 +570,7 @@ async def start_thread_run(
             discovered_data=festival.discovered_data,
         )
 
-        asyncio.create_task(
+        _track_background_task(
             _run_research_graph(
                 thread_id=thread_id,
                 festival_id=festival_id,

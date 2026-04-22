@@ -8,6 +8,7 @@ import httpx
 
 from src.config import Settings
 from src.core.schemas import EventDateData, FestivalData
+from src.services.circuit_breaker import circuit_breaker
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ class LLMClient:
         """Close HTTP client."""
         await self.client.aclose()
 
+    @circuit_breaker("llm", failure_threshold=3, recovery_timeout=60.0)
     async def chat_completion(
         self,
         messages: List[Dict[str, Any]],
@@ -67,6 +69,22 @@ class LLMClient:
 
             return content
 
+        except httpx.HTTPStatusError as e:
+            body = ""
+            try:
+                body = e.response.text[:500]
+            except Exception:
+                pass
+            logger.error(
+                f"LLM HTTP error {e.response.status_code}: {e}. Body: {body}"
+            )
+            raise
+        except httpx.NetworkError as e:
+            logger.error(f"LLM network error: {e}")
+            raise
+        except (KeyError, IndexError) as e:
+            logger.error(f"LLM response parsing error: {e}")
+            raise
         except Exception as e:
             logger.error(f"LLM request failed: {e}")
             raise

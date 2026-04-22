@@ -35,9 +35,14 @@ def create_research_graph(checkpointer=None):
         "evaluator", should_continue, {END: END, "planner": "planner"}
     )
 
-    # Use memory checkpointer (events are persisted to DB separately via StreamPersistenceHandler)
+    # Use Postgres checkpointer for persistence across restarts.
+    # Falls back to MemorySaver if Postgres is unavailable.
     if checkpointer is None:
-        checkpointer = MemorySaver()
+        try:
+            from src.core.database import get_postgres_checkpointer
+            checkpointer = get_postgres_checkpointer()
+        except Exception:
+            checkpointer = MemorySaver()
 
     return builder.compile(checkpointer=checkpointer)
 

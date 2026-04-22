@@ -62,7 +62,7 @@ async def search_node(state: RefreshState, config: RunnableConfig) -> dict:
     if current_start:
         try:
             year = str(datetime.fromisoformat(current_start.replace("Z", "+00:00")).year)
-        except:
+        except (ValueError, TypeError):
             pass
 
     search_query = f"{event_name} {year} festival official website dates".strip()
@@ -120,7 +120,7 @@ async def research_node(state: RefreshState, config: RunnableConfig) -> dict:
             try:
                 data = json.loads(msg.content)
                 search_results = data.get("results", [])
-            except:
+            except (json.JSONDecodeError, TypeError):
                 pass
 
     if not search_results:
@@ -225,7 +225,7 @@ async def evaluate_node(state: RefreshState, config: RunnableConfig) -> dict:
                     if found_date:
                         proposed_date_changes["start"] = found_date
                         change_summary.append(f"✗ Date corrected: {found_date}")
-            except:
+            except (json.JSONDecodeError, TypeError):
                 pass
 
     # Check for lineup
@@ -241,7 +241,7 @@ async def evaluate_node(state: RefreshState, config: RunnableConfig) -> dict:
                     if len(artists) > len(current_lineup):
                         proposed_date_changes["artists"] = [{"name": a} for a in artists]
                         change_summary.append(f"+ Lineup added: {len(artists)} artists")
-            except:
+            except (json.JSONDecodeError, TypeError):
                 pass
 
     # Determine if auto-approval is appropriate

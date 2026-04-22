@@ -2,6 +2,7 @@
 
 import logging
 from datetime import datetime, timedelta
+from src.utils.utc_now import utc_now
 
 from celery import shared_task
 from sqlalchemy import delete, select
@@ -22,13 +23,13 @@ def cleanup_failed():
     async def _cleanup():
         async with AsyncSessionLocal() as session:
             # Find festivals past purge date
-            cutoff = datetime.utcnow() - timedelta(days=settings.failed_festival_retention_days)
+            cutoff = utc_now() - timedelta(days=settings.failed_festival_retention_days)
 
             # Delete old failed festivals
             result = await session.execute(
                 delete(Festival)
                 .where(Festival.state == FestivalState.FAILED)
-                .where(Festival.purge_after < datetime.utcnow())
+                .where(Festival.purge_after < utc_now())
             )
 
             await session.commit()
@@ -54,7 +55,7 @@ def retry_failed():
             result = await session.execute(
                 select(Festival)
                 .where(Festival.state == FestivalState.FAILED)
-                .where(Festival.purge_after > datetime.utcnow())
+                .where(Festival.purge_after > utc_now())
             )
             festivals = result.scalars().all()
 

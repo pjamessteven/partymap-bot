@@ -7,19 +7,23 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from src.config import get_settings
-from src.core.database import init_db
+from src.core.database import engine
 from src.dashboard.router import router as dashboard_router
 from src.api.agents import router as agents_router
 from src.api.jobs import router as jobs_router
 from src.api.refresh import router as refresh_router
 from src.api.goabase import router as goabase_router
+from src.api.pipelines import router as pipelines_router
+from src.api.errors import router as errors_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
-    # Startup
-    await init_db()
+    # Startup: verify database connectivity (migrations run via entrypoint.sh)
+    from sqlalchemy import text
+    async with engine.connect() as conn:
+        await conn.execute(text("SELECT 1"))
     yield
     # Shutdown
 
@@ -50,6 +54,8 @@ def create_app() -> FastAPI:
     app.include_router(jobs_router, prefix="/api")
     app.include_router(refresh_router, prefix="/api")
     app.include_router(goabase_router, prefix="/api")
+    app.include_router(pipelines_router, prefix="/api")
+    app.include_router(errors_router, prefix="/api")
 
     # Static files
     app.mount("/static", StaticFiles(directory="src/dashboard/static"), name="static")
