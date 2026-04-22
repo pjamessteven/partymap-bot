@@ -110,13 +110,25 @@ A comprehensive bot for discovering and researching music festivals worldwide fo
 │  │                                                                             │   │
 │  │   [discovered] ──dedup──► [researching] ──research──► [researched]          │   │
 │  │        │                       │                         │                   │   │
-│  │        │ (if dup & up-to-date) │                         │                   │   │
+│  │        │ (if dup & up-to-date) │                         │ (validate)        │   │
 │  │        └───────────────────────┴─────────────────────────┤                   │   │
 │  │                                │                         ▼                   │   │
-│  │                                │                   [syncing] ──► [synced]     │   │
-│  │                                │                                             │   │
-│  │                                ▼                                             │   │
-│  │                           [failed] ──► (30 days) ──► [purged]                │   │
+│  │                                │                  [validating]                │   │
+│  │                                │                         │                   │   │
+│  │                                │              ┌──────────┴──────────┐        │   │
+│  │                                │              ▼                     ▼        │   │
+│  │                                │    [validation_failed]      [syncing]       │   │
+│  │                                │         (retry)                  │          │   │
+│  │                                │              └────────► [synced] ◄──────────┘   │   │
+│  │                                │                            │                   │   │
+│  │                                ▼                            │ (error)          │   │
+│  │                           [failed] ─────────────────────────┘                   │   │
+│  │                              │                                                  │   │
+│  │                    (5 retries)                                                  │   │
+│  │                              ▼                                                  │   │
+│  │                        [quarantined] ──► (30 days) ──► [purged]                │   │
+│  │                              │                                                  │   │
+│  │                              └───► [manual retry]                              │   │
 │  │                                                                             │   │
 │  │   Manual states:                                                             │   │
 │  │   [skipped] - Manually excluded                                             │   │
@@ -211,8 +223,29 @@ Discovery → Deduplication Check → Research → Sync
 - Can be manually triggered with custom query
 
 **Sources:**
-1. Exa API (primary)
-2. Goabase API (for psytrance)
+
+**1. Exa API (Primary)**
+- Neural search engine (semantic understanding, not keyword matching)
+- Searches entire web for festival announcements
+- Content extraction from result pages
+- Cost: ~$0.10 per search
+- Query rotation: 28 pre-populated queries (countries, cities, genres)
+- Filters: Domain include/exclude, date ranges
+
+**2. Goabase (Psytrance/Underground)**
+[Goabase](https://www.goabase.net/) is the world's largest database for psychedelic and underground parties. Integration provides:
+
+- **Event types**: Psytrance festivals, transformational gatherings, burner events, underground techno/house parties, Full Moon gatherings
+- **Data format**: JSON-LD structured data with rich metadata
+- **Sync modes**:
+  - Scheduled sync (daily/weekly/monthly configurable)
+  - Manual sync on demand
+  - Incremental updates based on `goabase_modified` timestamps
+- **Mapping**: Goabase fields → PartyMap schema (location, lineup, dates, tags)
+- **Unique features**: 
+  - GPS coordinates for outdoor events
+  - Underground/alternative events not on mainstream platforms
+  - Community-driven event quality ratings
 
 **Cost Limit:** $2.00 per discovery run
 
@@ -342,18 +375,254 @@ Research Agent → Festival (state=researched)
 
 In **manual mode**, the festival stays in `RESEARCHED` state and waits for manual sync.
 
-### Phase 4: Sync
+### Phase 4: Validation & Sync
 ```
-Sync to PartyMap:
-├─→ If new event:
-│   ├─→ POST /events (general info only)
-│   └─→ POST /api/date/event/{id} for each date
-├─→ If new EventDate:
-│   └─→ POST /api/date/event/{existing_id}
-├─→ If update general:
-│   └─→ PUT /events/{id} (NO date/location fields!)
-└─→ If update EventDate:
-    └─→ PUT /api/date/event/{id}/{date_id}
+Pre-flight Validation → PartyMap Sync:
+├─→ PartyMapSyncValidator.check()
+│   ├─→ Required fields: name, description, full_description, event_dates, logo
+│   ├─→ Date validation: end > start, dates in future
+│   ├─→ Location validation
+│   ├─→ Price validation
+│   └─→ Completeness score (0.0 - 1.0)
+│
+├─→ If valid (status=ready):
+│   ├─→ state → SYNCING
+│   └─→ Sync to PartyMap
+│
+├─→ If warnings (status=needs_review):
+│   ├─→ Auto-process: continue to sync
+│   └─→ Manual mode: stop for review
+│
+└─→ If invalid (status=validation_failed):
+    └─→ Store errors, wait for manual fix
+```
+
+### Phase 5: Error Handling
+```
+On Sync/Research Error:
+├─→ ErrorClassifier.categorize(error)
+│   ├─→ TRANSIENT: Rate limit, timeout, connection error → Retry with backoff
+│   ├─→ PERMANENT: 4xx errors (except 429), auth failure → Mark FAILED
+│   ├─→ VALIDATION: Schema mismatch, missing fields → Mark VALIDATION_FAILED
+│   ├─→ EXTERNAL: PartyMap API down → Retry later
+│   ├─→ BUDGET: Cost limit exceeded → Quarantine
+│   └─→ UNKNOWN: Uncategorized → Retry once
+│
+├─→ CircuitBreaker.check()
+│   ├─→ 5 failures in 60s → OPEN (fails fast)
+│   └─→ 30s timeout → HALF_OPEN (test recovery)
+│
+├─→ Retry count >= 5:
+│   ├─→ Move to QUARANTINED state
+│   ├─→ Store in Dead Letter Queue
+│   └─→ Manual retry only via Error Dashboard
+│
+└─→ Quarantine retention: 30 days → Auto-purge
+```
+
+## Error Resilience Architecture
+
+### Circuit Breakers
+Prevents cascading failures when external APIs are down or rate-limited.
+
+**Configuration:**
+- **Failure threshold**: 5 failures in 60-second window
+- **Recovery timeout**: 30 seconds before attempting recovery
+- **Half-open max calls**: 3 test calls in half-open state
+- **Success threshold**: 2 successes to close from half-open
+
+**Services protected:**
+- PartyMap API (5 failures / 30s recovery)
+- Exa API (5 failures / 30s recovery)
+- LLM/OpenRouter (3 failures / 60s recovery - more cautious due to cost)
+
+**States:**
+```
+CLOSED → (5 failures) → OPEN → (30s) → HALF_OPEN → (2 successes) → CLOSED
+                            ↓
+                    (failure in half-open) → OPEN
+```
+
+### Dead Letter Queue (DLQ)
+Quarantines festivals that have failed repeatedly and cannot be processed automatically.
+
+**Quarantine triggers:**
+- 5 failed retry attempts
+- Permanent error classification
+- Budget limit exceeded
+
+**DLQ features:**
+- 30-day retention period
+- Manual retry only (no automatic retry)
+- Bulk retry capability
+- Cleanup job removes expired entries
+- Error categorization for debugging
+
+**API endpoints:**
+- `GET /api/errors/quarantined` - List quarantined festivals
+- `POST /api/errors/quarantined/{id}/retry` - Retry single festival
+- `POST /api/errors/quarantined/bulk-retry` - Bulk retry
+- `POST /api/errors/cleanup` - Remove expired entries
+
+### Error Classification
+Automatic categorization enables smart retry decisions:
+
+| Category | Examples | Retry Strategy |
+|----------|----------|----------------|
+| **TRANSIENT** | Rate limit (429), timeout, connection reset | Exponential backoff: 2min, 4min, 8min... |
+| **PERMANENT** | 404, 401/403 auth, validation errors | Don't retry, mark FAILED |
+| **VALIDATION** | Schema mismatch, missing required fields | Don't retry, mark VALIDATION_FAILED |
+| **EXTERNAL** | PartyMap API 5xx errors | Retry with backoff |
+| **BUDGET** | Cost limit, quota exceeded | Quarantine immediately |
+| **UNKNOWN** | Uncategorized | Retry once, then quarantine |
+
+### Validation System
+Pre-flight validation prevents wasting API calls on data that will definitely fail.
+
+**PartyMapSyncValidator checks:**
+1. **Required fields**: name, description (≥10 chars), full_description (≥20 chars)
+2. **Event dates**: At least one date, end > start, dates in future (warning)
+3. **Location**: location_description required
+4. **Media**: logo_url required for sync
+5. **URLs**: Valid format for website_url, youtube_url
+6. **Prices**: max >= min for ticket prices
+7. **Tags**: Max 5 tags (PartyMap limit)
+
+**Validation results:**
+- `ready` - All checks pass, can sync
+- `needs_review` - Warnings present but can proceed
+- `invalid` - Errors present, cannot sync
+
+**Completeness score:** 0.0-1.0 based on required vs optional fields present
+
+## Refresh Pipeline
+
+Monitors and updates existing PartyMap events with unconfirmed dates.
+
+**When it runs:**
+- Scheduled: Checks events 120 days ahead
+- Manual: Trigger via `/api/refresh/trigger`
+
+**What it does:**
+1. Query PartyMap for events with `date_unconfirmed=true`
+2. Re-research each event to verify/correct information
+3. Queue changes for approval (human-in-the-loop)
+4. Auto-cancel events that remain unconfirmed 30 days before start
+
+**Approval workflow:**
+```
+Refresh Agent → Proposed Changes → Pending Approval
+                                           │
+                    ┌──────────────────────┼──────────────────────┐
+                    ▼                      ▼                      ▼
+                [Approve]              [Reject]               [Auto]
+                    │                      │                      │
+                    ▼                      ▼                      ▼
+            Apply changes           Discard changes          Auto-approved
+            to PartyMap                                       (high confidence)
+```
+
+**API endpoints:**
+- `GET /api/refresh/approvals` - List pending approvals
+- `POST /api/refresh/approvals/{id}/approve` - Approve changes
+- `POST /api/refresh/approvals/{id}/reject` - Reject changes
+- `POST /api/refresh/trigger` - Manually trigger refresh
+
+## Streaming Architecture (LangGraph Compatible)
+
+Real-time streaming of AI agent progress using Server-Sent Events (SSE).
+
+**Purpose:** Frontend uses LangGraph's `useStream()` hook which expects specific SSE format.
+
+**Endpoint:** `GET /api/threads/{thread_id}/runs/stream?stream_mode=messages,custom,tools`
+
+**SSE Event Format:**
+```
+event: metadata
+data: {"thread_id": "research_abc123", "status": "running"}
+
+event: messages
+data: [{"type": "ai", "data": {"content": "Researching..."}}, {"run_id": "run_123"}]
+
+event: custom
+data: {"type": "reasoning", "data": {"step": "searching"}, "timestamp": "2026-01-01T00:00:00"}
+
+event: tools
+data: {"toolCallId": "call_123", "name": "web_search", "state": "starting", "input": "festival 2026"}
+
+event: end
+data: {"status": "success"}
+```
+
+**Critical format requirements for UseStream() compatibility:**
+- `messages` event: data MUST be `[messageDict, metadataDict]` (array of 2 elements)
+- `custom` event: data MUST have `type` and `data` fields
+- `tools` event: data MUST have `toolCallId`, `name`, `state`
+- `end` event: data MUST have `status: "success"` or `"completed"`
+- `ping` event: sent every 30 seconds as keepalive
+
+**Stream modes (query parameter):**
+- `messages` - Agent messages and responses
+- `updates` - State updates
+- `custom` - Custom events (reasoning, evaluation, tool_progress)
+- `tools` - Tool execution status
+- `events` - All LangGraph events
+- `debug` - Debug information
+
+**Historical replay:**
+- On connection: Replays all historical events from database
+- Then bridges to live broadcaster for real-time updates
+- Ensures no gap between history and live stream
+
+## Unit Testing Strategy
+
+Comprehensive test suite with 211+ tests covering all critical paths.
+
+**Test organization:**
+```
+tests/
+├── unit/                    # Fast unit tests (SQLite in-memory)
+│   ├── test_errors_router.py       # DLQ, circuit breakers, validation
+│   ├── test_festivals_router.py    # Festival CRUD, sync, research
+│   ├── test_refresh_router.py      # Refresh approvals
+│   ├── test_agents_router.py       # SSE streaming conformance
+│   ├── test_schedule_router.py     # Schedule management
+│   ├── test_settings_router.py     # System settings
+│   ├── test_validators.py          # PartyMapSyncValidator
+│   ├── test_dead_letter_queue.py   # DLQ operations
+│   └── test_circuit_breaker.py     # Circuit breaker states
+└── integration/             # Integration tests (PostgreSQL)
+    └── test_integration.py
+```
+
+**Testing approach:**
+- **Unit tests**: SQLite in-memory, mocked external APIs, 80%+ coverage requirement
+- **Integration tests**: Real PostgreSQL + Redis via docker-compose.test.yml
+- **Streaming tests**: Verify SSE format matches UseStream() expectations
+- **Circuit breaker tests**: State machine transitions, timeout behavior
+
+**Key fixtures:**
+- `async_client` - HTTPX client for FastAPI testing
+- `db_session` - Async SQLAlchemy session with rollback
+- `mock_celery_tasks` - Mocked Celery task functions
+- `mock_partymap_client` - Mocked PartyMap API client
+- `mock_broadcaster` - Mocked StreamBroadcaster for streaming tests
+
+**Coverage requirements:**
+- New endpoints: 100% coverage
+- Core services: 90% coverage
+- Overall: 80% minimum (enforced in CI)
+
+**Running tests:**
+```bash
+# Unit tests (SQLite, fast)
+pytest tests/unit/ -v --cov=src --cov-fail-under=80
+
+# Integration tests (PostgreSQL + Redis)
+docker-compose -f docker-compose.test.yml up --abort-on-container-exit
+
+# All tests during Docker build (fails build if tests fail)
+docker build -t partymap-api apps/api/
 ```
 
 ## Tech Stack
@@ -397,29 +666,108 @@ partymap-bot/
 
 ## Database Tables
 
-1. **festivals** - Core data + state machine + PartyMap tracking
-2. **festival_event_dates** - Individual dates for series
-3. **discovery_queries** - Query rotation (28 pre-populated)
-4. **agent_decisions** - Summarized decision logs
-5. **state_transitions** - Audit trail
-6. **cost_logs** - Budget tracking
-7. **pipeline_schedules** - **Celery Beat schedule configuration**
-8. **system_settings** - **Global settings (auto_process, etc.)**
-9. **name_mappings** - Raw→clean name mappings for deduplication
+### Core Tables
+
+1. **festivals** - Core festival data with state machine and error tracking
+   - `state` - Current state in lifecycle (discovered, researching, researched, validating, validation_failed, syncing, synced, failed, quarantined, skipped)
+   - `research_data` - JSONB with full FestivalData from research agent
+   - `validation_status` - Pre-sync validation result (pending, ready, needs_review, invalid)
+   - `validation_errors` - JSONB array of validation errors
+   - `validation_warnings` - JSONB array of validation warnings
+   - `error_category` - Classification of last error (transient, permanent, validation, external, budget, unknown)
+   - `error_context` - JSONB with detailed error info for debugging
+   - `retry_count` - Number of retry attempts
+   - `max_retries_reached` - Boolean flag for quarantine eligibility
+   - `quarantined_at` - Timestamp when moved to DLQ
+   - `quarantine_reason` - Why festival was quarantined
+   - `first_error_at`, `last_retry_at` - Error tracking timestamps
+
+2. **festival_event_dates** - Individual dates for festival series
+
+3. **refresh_approvals** - Pending changes from refresh pipeline awaiting human approval
+   - `event_id`, `event_date_id` - PartyMap IDs being updated
+   - `proposed_changes` - JSONB with event and event_date changes
+   - `change_summary` - Human-readable list of changes
+   - `research_confidence` - AI confidence score (0.0-1.0)
+   - `status` - pending, auto_approved, approved, rejected, applied
+
+### Agent & Streaming Tables
+
+4. **agent_threads** - Active and completed agent runs
+   - `thread_id` - Unique identifier for streaming
+   - `festival_id` - Associated festival
+   - `agent_type` - discovery, research, refresh
+   - `status` - running, completed, failed
+   - `total_tokens`, `cost_cents` - Usage tracking
+
+5. **agent_stream_events** - Persisted stream events for historical replay
+   - `thread_id` - Parent thread
+   - `event_type` - messages, custom, tools, error, etc.
+   - `event_data` - JSONB payload
+   - `event_index` - Ordering for replay
+
+6. **agent_decisions** - Summarized agent decision logs
+
+### Configuration & Control Tables
+
+7. **discovery_queries** - Query rotation (28 pre-populated)
+
+8. **pipeline_schedules** - Celery Beat schedule configuration
+   - `task_type` - discovery, goabase_sync, cleanup_failed, refresh
+   - `enabled` - Boolean flag
+   - `hour`, `minute`, `day_of_week` - Cron-like scheduling
+   - `last_run_at`, `next_run_at` - Execution tracking
+
+9. **system_settings** - Global configuration
+   - `auto_process` - Enable/disable automatic pipeline progression
+   - `max_cost_per_day` - Daily budget limit
+   - Various research/sync settings
+
+### Supporting Tables
+
+10. **state_transitions** - Complete audit trail of all state changes
+
+11. **cost_logs** - Detailed cost tracking per API call
+
+12. **job_activity** - Background job execution history
+
+13. **name_mappings** - Raw→clean name mappings for deduplication
 
 ## Key Design Decisions
+
+### Pipeline & Data Flow
 
 1. **Deduplication Before Research**: Saves API costs by not researching known festivals
 2. **Event/EventDate Split**: Supports festival series with multiple dates/locations
 3. **All-or-Nothing Research**: Ensures data quality (no partial entries)
 4. **No Main Event Date Updates**: Prevents accidental deletion of future EventDates
 5. **State Machine**: Clear lifecycle with retry logic and audit trail
-6. **Cost Tracking**: Budget enforcement per festival, run, and day
-7. **Query Rotation**: Systematic coverage of countries, cities, genres
-8. **Summarized Logs**: Agent decisions logged but condensed for readability
-9. **Database-Driven Scheduling**: No hardcoded schedules, fully configurable via API
-10. **Auto/Manual Mode**: Full control for testing individual pipeline stages
-11. **Swagger Documentation**: All endpoints documented with OpenAPI
+6. **Query Rotation**: Systematic coverage of countries, cities, genres
+7. **Database-Driven Scheduling**: No hardcoded schedules, fully configurable via API
+8. **Auto/Manual Mode**: Full control for testing individual pipeline stages
+
+### Error Resilience
+
+9. **Pre-flight Validation**: Validates festival data BEFORE attempting PartyMap sync (prevents wasting API calls)
+10. **Circuit Breakers**: Prevents cascading failures when external APIs are down (5 failures/60s threshold)
+11. **Dead Letter Queue**: Quarantines persistently failed festivals for manual review (30-day retention)
+12. **Error Classification**: Automatic categorization enables smart retry decisions (transient/permanent/validation/external/budget)
+13. **Exponential Backoff**: Retry delays increase with each attempt (2min, 4min, 8min...)
+
+### Quality & Monitoring
+
+14. **Cost Tracking**: Budget enforcement per festival, run, and day with detailed logs
+15. **Completeness Scoring**: 0.0-1.0 score indicates data quality before sync
+16. **Human-in-the-Loop**: Refresh pipeline requires approval for high-stakes changes
+17. **Summarized Logs**: Agent decisions logged but condensed for readability
+18. **Real-time Streaming**: SSE format compatible with LangGraph's UseStream() hook
+
+### Testing & Reliability
+
+19. **Comprehensive Test Suite**: 211+ unit tests with 80%+ coverage requirement
+20. **Build-time Testing**: Docker build fails if tests fail (prevents bad deployments)
+21. **CI/CD Integration**: GitHub Actions runs tests on every PR/push
+22. **Swagger Documentation**: All endpoints documented with OpenAPI
 
 ## Environment Variables
 
@@ -528,6 +876,37 @@ curl -X POST http://localhost:8000/api/festivals/{id}/sync
 - Ensure festival is in correct state for action
 - Check `/api/festivals/pending` for suggested actions
 - Verify auto_process is disabled for manual control
+
+**Festival stuck in validation_failed:**
+- Check validation errors: `GET /api/festivals/{id}`
+- Fix missing required fields (name, description, dates, logo)
+- Re-validate: `POST /api/errors/festivals/{id}/validate`
+- Or force sync anyway: `POST /api/festivals/{id}/force-sync`
+
+**Festival quarantined:**
+- View in Error Dashboard at `/errors`
+- Check error category and context for root cause
+- Retry after fixing issue: `POST /api/errors/quarantined/{id}/retry`
+- Or force retry: `POST /api/errors/quarantined/{id}/retry?force=true`
+
+**Circuit breaker open:**
+- Check circuit breaker status: `GET /api/errors/circuit-breakers`
+- Wait 30 seconds for automatic recovery (half-open)
+- Or manually reset: `POST /api/errors/circuit-breakers/{name}/reset`
+- Check external API status (PartyMap, Exa, OpenRouter)
+
+**Sync failing repeatedly:**
+- Check error classification in festival.error_category
+- TRANSIENT errors: Will retry automatically with backoff
+- VALIDATION errors: Fix data quality issues before retry
+- PERMANENT errors: Check API credentials and permissions
+- EXTERNAL errors: PartyMap API may be down, wait and retry
+
+**Tests failing in CI:**
+- Run locally: `pytest tests/unit/ -v`
+- Check coverage: `pytest tests/unit/ --cov=src --cov-report=term-missing`
+- Ensure 80%+ coverage for new code
+- Check for mocking issues with external APIs
 
 ## API Documentation
 
