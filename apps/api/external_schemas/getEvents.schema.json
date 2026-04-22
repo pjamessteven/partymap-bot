@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Get Events Request",
+  "description": "Schema for GET /events endpoint query parameters",
+  "type": "object",
+  "properties": {
+    "query": {
+      "type": "string",
+      "description": "Search query string to filter events"
+    },
+    "created_by": {
+      "type": "string",
+      "description": "Filter events created by a specific user (username or user ID)"
+    },
+    "sort": {
+      "type": "string",
+      "description": "Property to sort results by",
+      "enum": ["created_at", "name", "id"],
+      "default": "created_at"
+    },
+    "per_page": {
+      "type": "integer",
+      "description": "Number of items to return per page",
+      "minimum": 1,
+      "default": 10
+    },
+    "page": {
+      "type": "integer",
+      "description": "Page number (1-indexed). Use 0 to return all items",
+      "minimum": 0,
+      "default": 1
+    },
+    "desc": {
+      "type": "boolean",
+      "description": "Sort results in descending order",
+      "default": false
+    }
+  },
+  "additionalProperties": false
+}

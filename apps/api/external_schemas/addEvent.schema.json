@@ -1,0 +1,322 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Create Event Request",
+  "description": "Schema for creating a new event (POST /event)",
+  "type": "object",
+  "required": [
+    "name",
+    "description",
+    "full_description",
+    "date_time",
+    "location",
+    "logo"
+  ],
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Event name"
+    },
+    "description": {
+      "type": "string",
+      "description": "Brief event description"
+    },
+    "description_attribute": {
+      "type": ["string", "null"],
+      "description": "Source attribution for description (optional)"
+    },
+    "full_description": {
+      "type": "string",
+      "description": "Full event description"
+    },
+    "full_description_attribute": {
+      "type": ["string", "null"],
+      "description": "Source attribution for full description (optional)"
+    },
+    "youtube_url": {
+      "type": ["string", "null"],
+      "description": "YouTube video URL for the event (optional)"
+    },
+    "date_time": {
+      "type": "object",
+      "description": "Event date and time",
+      "required": ["start", "end"],
+      "properties": {
+        "start": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Start time in ISO-8601 format (e.g., 2026-02-05 18:00:00)"
+        },
+        "end": {
+          "type": "string",
+          "format": "date-time",
+          "description": "End time in ISO-8601 format (e.g., 2026-02-06 06:00:00)"
+        }
+      }
+    },
+    "location": {
+      "type": "object",
+      "description": "Event location. You can provide either a simple description for Google Maps lookup or a full Google place payload.",
+      "oneOf": [
+        {
+          "required": ["description"],
+          "properties": {
+            "description": {
+              "type": "string",
+              "description": "Free-text location description to look up (e.g., '123 test road')"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["place_id", "description", "geometry", "types", "address_components"],
+          "properties": {
+            "place_id": {
+              "type": "string",
+              "description": "Stable place identifier"
+            },
+            "name": {
+              "type": ["string", "null"],
+              "description": "Place name"
+            },
+            "description": {
+              "type": "string",
+              "description": "Human-readable address or place description"
+            },
+            "types": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "geometry": {
+              "type": "object",
+              "required": ["location"],
+              "properties": {
+                "location": {
+                  "type": "object",
+                  "required": ["lat", "lng"],
+                  "properties": {
+                    "lat": {
+                      "type": "number"
+                    },
+                    "lng": {
+                      "type": "number"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            "address_components": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["long_name", "short_name", "types"],
+                "properties": {
+                  "long_name": {
+                    "type": "string"
+                  },
+                  "short_name": {
+                    "type": "string"
+                  },
+                  "types": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "additionalProperties": true
+              }
+            }
+          },
+          "additionalProperties": true
+        }
+      ]
+    },
+    "url": {
+      "type": ["string", "null"],
+      "description": "Event website URL (optional)"
+    },
+    "tags": {
+      "type": ["array", "null"],
+      "description": "List of event tags (optional)",
+      "items": {
+        "type": "string"
+      }
+    },
+    "logo": {
+      "type": ["object", "null"],
+      "description": "Event page logo/cover image (optional)",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "URL to logo/cover image"
+        },
+        "base64File": {
+          "type": "string",
+          "description": "Alternatively provide Base64-encoded image data"
+        }
+      }
+    },
+    "media_items": {
+      "type": ["array", "null"],
+      "description": "List of media items/images for the event (optional)",
+      "items": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "URL to media item"
+          },
+          "base64File": {
+            "type": "string",
+            "description": "Alternatively provide Base64-encoded image data"
+          },
+          "caption": {
+            "type": "string",
+            "description": "Media item caption"
+          }
+        }
+      }
+    },
+    "rrule": {
+      "type": ["object", "null"],
+      "description": "Recurrence rule for repeating events (defaults to yearly if provided)",
+      "default": {
+        "recurringType": 3,
+        "separationCount": 1,
+        "dayOfWeek": null,
+        "weekOfMonth": null,
+        "monthOfYear": null,
+        "dayOfMonth": null,
+        "exact": false
+      },
+      "properties": {
+        "recurringType": {
+          "type": "integer",
+          "description": "Type of recurrence (0=daily, 1=weekly, 2=monthly, 3=yearly)",
+          "default": 3
+        },
+        "separationCount": {
+          "type": "integer",
+          "description": "Number of intervals between occurrences (0 = no recurrence)",
+          "default": 1
+        },
+        "dayOfWeek": {
+          "type": ["integer", "null"],
+          "description": "Day of week (0-6, Sunday=0)",
+          "default": null
+        },
+        "weekOfMonth": {
+          "type": ["integer", "null"],
+          "description": "Week of month (1-5)",
+          "default": null
+        },
+        "monthOfYear": {
+          "type": ["integer", "null"],
+          "description": "Month of year (1-12)",
+          "default": null
+        },
+        "dayOfMonth": {
+          "type": ["integer", "null"],
+          "description": "Day of month (1-31)",
+          "default": null
+        },
+        "exact": {
+          "type": "boolean",
+          "description": "Whether to use exact dates or relative patterns",
+          "default": false
+        }
+      }
+    },
+    "next_event_date_description": {
+      "type": ["string", "null"],
+      "description": "Description specific to the next event date (optional)"
+    },
+    "next_event_date_description_attribute": {
+      "type": ["string", "null"],
+      "description": "Source attribution for next event date description (optional)"
+    },
+    "next_event_date_size": {
+      "type": ["integer", "null"],
+      "description": "Expected attendance/size for next event date (optional)"
+    },
+    "next_event_date_artists": {
+      "type": ["array", "null"],
+      "description": "Lineup/List of artists performing at next event date (optional)",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Artist name"
+          }
+        }
+      }
+    },
+    "next_event_date_lineup_images": {
+      "type": ["array", "null"],
+      "description": "List of lineup images for next event date (optional)",
+      "items": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "URL to media item"
+          },
+          "base64File": {
+            "type": "string",
+            "description": "Alternatively provide Base64-encoded image data"
+          },
+          "caption": {
+            "type": "string",
+            "description": "Media item caption"
+          }
+        }
+      }
+    },
+    "tickets": {
+      "type": ["array", "null"],
+      "description": "List of ticket objects for the next event date (optional)",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": ["integer", "null"],
+            "description": "Ticket ID (optional; ignored on create)"
+          },
+          "event_id": {
+            "type": ["integer", "null"],
+            "description": "Parent event ID (optional; ignored on create)"
+          },
+          "event_date_id": {
+            "type": ["integer", "null"],
+            "description": "Parent event-date ID (optional; ignored on create)"
+          },
+          "url": {
+            "type": ["string", "null"],
+            "description": "Ticket purchase URL"
+          },
+          "description": {
+            "type": ["string", "null"],
+            "description": "Ticket description (e.g., 'General Admission')"
+          },
+          "price_min": {
+            "type": ["number", "null"],
+            "description": "Minimum ticket price"
+          },
+          "price_max": {
+            "type": ["number", "null"],
+            "description": "Maximum ticket price"
+          },
+          "price_currency_code": {
+            "type": ["string", "null"],
+            "description": "Currency code (e.g., 'USD', 'EUR')"
+          }
+        }
+      }
+    }
+  }
+}

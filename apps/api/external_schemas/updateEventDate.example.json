@@ -1,0 +1,66 @@
+{
+  "description": "Set times confirmed and final release tickets now available.",
+  "description_attribute": null,
+  "url": "https://summerfest2026.example.com/opening-night-updated",
+  "tickets": [
+    {
+      "id": 101,
+      "event_id": 42,
+      "event_date_id": 314,
+      "url": "https://tickets.example.com/summerfest2026/opening-night/final-release",
+      "description": "Final Release General Admission",
+      "price_min": 109.99,
+      "price_max": 109.99,
+      "price_currency_code": "USD"
+    },
+    {
+      "id": 102,
+      "event_id": 42,
+      "event_date_id": 314,
+      "url": "https://tickets.example.com/summerfest2026/opening-night/backstage",
+      "description": "Backstage Experience",
+      "price_min": 349.99,
+      "price_max": 399.99,
+      "price_currency_code": "USD"
+    }
+  ],
+  "size": 13500,
+  "date_time": {
+    "start": "2026-07-15T18:30:00",
+    "end": "2026-07-16T01:30:00"
+  },
+  "location": {
+    "description": "Central Park, New York, NY - East Meadow Entrance"
+  },
+  "cancelled": false,
+  "add_artists": [
+    {
+      "name": "Late Night Guest",
+      "stage": "After Hours Tent",
+      "start_naive": "2026-07-16T00:15:00"
+    }
+  ],
+  "remove_artists": [
+    {
+      "id": 88
+    }
+  ],
+  "update_artists": [
+    {
+      "id": 91,
+      "start_naive": "2026-07-15T22:30:00"
+    }
+  ],
+  "lineup_images": [
+    {
+      "url": "https://example.com/opening-night-lineup-final.jpg",
+      "caption": "Final opening night lineup poster"
+    }
+  ],
+  "media_items": [
+    {
+      "url": "https://example.com/opening-night-stage-map.jpg",
+      "caption": "Updated stage and entry map"
+    }
+  ]
+}

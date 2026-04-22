@@ -1,0 +1,118 @@
+version: "3.8"
+
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: partymap
+      POSTGRES_PASSWORD: partymap
+      POSTGRES_DB: partymap_bot
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5438:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U partymap -d partymap_bot"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://partymap:partymap@db:5432/partymap_bot
+      - REDIS_URL=redis://redis:6379/0
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./apps/api/src:/app/src
+      - ./apps/api/entrypoint.sh:/app/entrypoint.sh
+    entrypoint: ["/app/entrypoint.sh"]
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://partymap:partymap@db:5432/partymap_bot
+      - REDIS_URL=redis://redis:6379/0
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+    volumes:
+      - ./apps/api/src:/app/src
+      - ./apps/api/entrypoint.sh:/app/entrypoint.sh
+    entrypoint: ["/app/entrypoint.sh"]
+    command: celery -A src.tasks.celery_app worker -l info -Q celery,discovery,dedup,research,sync -c 3
+
+  scheduler:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://partymap:partymap@db:5432/partymap_bot
+      - REDIS_URL=redis://redis:6379/0
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+    volumes:
+      - ./apps/api/src:/app/src
+      - ./apps/api/entrypoint.sh:/app/entrypoint.sh
+    entrypoint: ["/app/entrypoint.sh"]
+    command: celery -A src.tasks.celery_app beat -l info --scheduler src.tasks.scheduler:DatabaseScheduler
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - API_URL=http://api:8000
+      - NODE_ENV=production
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:

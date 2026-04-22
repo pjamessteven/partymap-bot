@@ -1,0 +1,14 @@
+# Development Dockerfile for Next.js
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install dependencies only when needed
+# Note: node_modules will be installed at runtime via volume or entrypoint
+# to ensure they persist and work correctly with bind mounts
+
+# Expose the port
+EXPOSE 3000
+
+# Default command (can be overridden in docker-compose)
+CMD ["npm", "run", "dev"]

@@ -1,0 +1,105 @@
+[project]
+name = "partymap-bot"
+version = "0.1.0"
+description = "Automated festival discovery and research bot for PartyMap"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    # Web Framework
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "python-multipart>=0.0.17",
+    
+    # Database
+    "sqlalchemy[asyncio]>=2.0.36",
+    "asyncpg>=0.30.0",
+    "psycopg2-binary>=2.9.10",
+    "alembic>=1.14.0",
+    "aiosqlite>=0.20.0",
+    
+    # Task Queue
+    "celery>=5.4.0",
+    "redis>=5.2.0",
+    
+    # HTTP Client
+    "httpx>=0.28.0",
+    "tenacity>=9.0.0",
+    
+    # Browser Automation
+    "playwright>=1.49.0",
+    
+    # LangChain for Agents
+    "langchain>=0.3.0",
+    "langchain-core>=0.3.0",
+    "langchain-openai>=0.3.0",
+    "langchain-community>=0.3.0",
+
+    # LangGraph
+    "langgraph>=0.2.0",
+    "langgraph-checkpoint>=2.0.0",
+    "langgraph-checkpoint-postgres>=2.0.0",
+
+    # LLM
+    "openai>=1.57.0",
+
+    # MusicBrainz for artist lookup
+    "musicbrainzngs>=0.7.1",
+    
+    # Search
+    "exa-py>=1.0.0",
+    
+    # Data Validation
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.7.0",
+    
+    # Date/Time
+    "python-dateutil>=2.9.0",
+    
+    # Utilities
+    "aiofiles>=24.1.0",
+    "pillow>=11.0.0",
+    
+    # Logging
+    "structlog>=24.4.0",
+    
+    # Database Migrations
+    "alembic>=1.14.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.25.0",
+    "pytest-cov>=6.0.0",
+    "respx>=0.22.0",
+    "black>=24.10.0",
+    "ruff>=0.8.0",
+    "mypy>=1.13.0",
+    "watchfiles>=1.0.0",
+]
+
+[tool.black]
+line-length = 100
+target-version = ['py312']
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+pythonpath = ["src"]
+addopts = "-v --tb=short"
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"

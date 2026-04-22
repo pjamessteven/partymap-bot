@@ -1,0 +1,65 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    libpq-dev \
+    curl \
+    # Playwright dependencies
+    libglib2.0-0 \
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libdbus-1-3 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libpango-1.0-0 \
+    libcairo2 \
+    libasound2 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+COPY pyproject.toml .
+RUN pip install --no-cache-dir -e "."
+
+# Copy application code
+COPY src/ ./src/
+COPY scripts/ ./scripts/
+COPY tests/ ./tests/
+COPY migrations/ ./migrations/
+COPY alembic.ini .
+COPY migrate.sh .
+
+# Create non-root user
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+
+# Install Playwright browsers as appuser
+USER appuser
+RUN playwright install chromium
+
+# Switch back to root for deps installation
+USER root
+RUN playwright install-deps chromium
+
+# Switch back to appuser for runtime
+USER appuser
+
+EXPOSE 8000
+
+# Copy and set up entrypoint script
+COPY --chown=appuser:appuser entrypoint.sh /app/entrypoint.sh
+USER root
+RUN chmod +x /app/entrypoint.sh
+USER appuser
+
+ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]

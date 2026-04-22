@@ -1,0 +1,230 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Update Event Request",
+  "description": "Schema for updating an existing event (PUT /event/[event_id]",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Event name"
+    },
+    "description": {
+      "type": ["string", "null"],
+      "description": "Brief event description"
+    },
+    "description_attribute": {
+      "type": ["string", "null"],
+      "description": "Source attribution for description"
+    },
+    "full_description": {
+      "type": ["string", "null"],
+      "description": "Full event description"
+    },
+    "full_description_attribute": {
+      "type": ["string", "null"],
+      "description": "Source attribution for full description"
+    },
+    "youtube_url": {
+      "type": ["string", "null"],
+      "description": "YouTube video URL for the event"
+    },
+    "date_time": {
+      "type": ["object", "null"],
+      "description": "Event date and time",
+      "properties": {
+        "start": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Start time in ISO-8601 format (e.g., 2026-02-05T18:00:00)"
+        },
+        "end": {
+          "type": "string",
+          "format": "date-time",
+          "description": "End time in ISO-8601 format (e.g., 2026-02-06T06:00:00)"
+        }
+      }
+    },
+    "location": {
+      "type": ["object", "null"],
+      "description": "Event location. You can provide either a simple description for Google Maps lookup or a full Google place payload.",
+      "oneOf": [
+        {
+          "required": ["description"],
+          "properties": {
+            "description": {
+              "type": "string",
+              "description": "Free-text location description to look up"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["place_id", "description", "geometry", "types", "address_components"],
+          "properties": {
+            "place_id": {
+              "type": "string",
+              "description": "Stable place identifier"
+            },
+            "name": {
+              "type": ["string", "null"],
+              "description": "Place name"
+            },
+            "description": {
+              "type": "string",
+              "description": "Human-readable address or place description"
+            },
+            "types": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "geometry": {
+              "type": "object",
+              "required": ["location"],
+              "properties": {
+                "location": {
+                  "type": "object",
+                  "required": ["lat", "lng"],
+                  "properties": {
+                    "lat": {
+                      "type": "number"
+                    },
+                    "lng": {
+                      "type": "number"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            "address_components": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["long_name", "short_name", "types"],
+                "properties": {
+                  "long_name": {
+                    "type": "string"
+                  },
+                  "short_name": {
+                    "type": "string"
+                  },
+                  "types": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "additionalProperties": true
+              }
+            }
+          },
+          "additionalProperties": true
+        }
+      ]
+    },
+    "url": {
+      "type": ["string", "null"],
+      "description": "Event website URL"
+    },
+    "add_tags": {
+      "type": ["array", "null"],
+      "description": "List of tags to add to the event",
+      "items": {
+        "type": "string"
+      }
+    },
+    "remove_tags": {
+      "type": ["array", "null"],
+      "description": "List of tags to remove from the event",
+      "items": {
+        "type": "string"
+      }
+    },
+    "hidden": {
+      "type": "boolean",
+      "description": "Whether to hide/unhide the event (admin only)"
+    },
+    "logo": {
+      "type": ["object", "null"],
+      "description": "Event logo image",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "URL to logo image"
+        },
+        "base64File": {
+          "type": "string",
+          "description": "Alternatively provide a Base64-encoded image data"
+        }
+      }
+    },
+    "media_items": {
+      "type": ["array", "null"],
+      "description": "List of media items/images to add to the event",
+      "items": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "URL to media item"
+          },
+          "base64File": {
+            "type": "string",
+            "description": "Alternatively provide a Base64-encoded image data"
+          },
+          "caption": {
+            "type": "string",
+            "description": "Media item caption"
+          }
+        }
+      }
+    },
+    "rrule": {
+      "type": ["object", "null"],
+      "description": "Recurrence rule for repeating events",
+      "properties": {
+        "recurringType": {
+          "type": "integer",
+          "description": "Type of recurrence (0=daily, 1=weekly, 2=monthly, 3=yearly)"
+        },
+        "separationCount": {
+          "type": "integer",
+          "description": "Number of intervals between occurrences (0 = no recurrence)"
+        },
+        "dayOfWeek": {
+          "type": ["integer", "null"],
+          "description": "Day of week (0-6, Sunday=0)"
+        },
+        "weekOfMonth": {
+          "type": ["integer", "null"],
+          "description": "Week of month (1-5)"
+        },
+        "monthOfYear": {
+          "type": ["integer", "null"],
+          "description": "Month of year (1-12)"
+        },
+        "dayOfMonth": {
+          "type": ["integer", "null"],
+          "description": "Day of month (1-31)"
+        },
+        "exact": {
+          "type": "boolean",
+          "description": "Whether to use exact dates or relative patterns"
+        }
+      }
+    },
+    "remove_rrule": {
+      "type": "boolean",
+      "description": "Whether to remove the recurrence rule"
+    },
+    "message": {
+      "type": ["string", "null"],
+      "description": "Message explaining the update"
+    }
+  },
+  "additionalProperties": false
+}

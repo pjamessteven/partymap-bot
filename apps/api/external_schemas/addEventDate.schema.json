@@ -1,0 +1,234 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Add Event Date Request",
+  "description": "Schema for adding a date to an existing event (POST /date/event/[event_id])",
+  "type": "object",
+  "required": ["date_time", "location"],
+  "properties": {
+    "description": {
+      "type": ["string", "null"],
+      "description": "Description specific to this event date"
+    },
+    "description_attribute": {
+      "type": ["string", "null"],
+      "description": "Source attribution for the event-date description"
+    },
+    "url": {
+      "type": ["string", "null"],
+      "description": "External URL specific to this event date"
+    },
+    "size": {
+      "type": ["integer", "null"],
+      "description": "Estimated attendance or capacity for this event date"
+    },
+    "date_time": {
+      "type": "object",
+      "description": "Local event-date start and end datetimes. The backend derives timezone from the supplied location and currently expects both fields.",
+      "required": ["start", "end"],
+      "properties": {
+        "start": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Start datetime in ISO-8601 format, interpreted as local time at the event location"
+        },
+        "end": {
+          "type": "string",
+          "format": "date-time",
+          "description": "End datetime in ISO-8601 format, interpreted as local time at the event location"
+        }
+      },
+      "additionalProperties": false
+    },
+    "location": {
+      "type": "object",
+      "description": "Event-date location. You can provide either a simple description for Google Maps lookup or a full Google place payload.",
+      "oneOf": [
+        {
+          "required": ["description"],
+          "properties": {
+            "description": {
+              "type": "string",
+              "description": "Free-text location description to look up"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["place_id", "description", "geometry", "types", "address_components"],
+          "properties": {
+            "place_id": {
+              "type": "string",
+              "description": "Stable place identifier"
+            },
+            "name": {
+              "type": ["string", "null"],
+              "description": "Place name"
+            },
+            "description": {
+              "type": "string",
+              "description": "Human-readable address or place description"
+            },
+            "types": {
+              "type": "array",
+              "description": "Place type identifiers",
+              "items": {
+                "type": "string"
+              }
+            },
+            "geometry": {
+              "type": "object",
+              "required": ["location"],
+              "properties": {
+                "location": {
+                  "type": "object",
+                  "required": ["lat", "lng"],
+                  "properties": {
+                    "lat": {
+                      "type": "number",
+                      "description": "Latitude"
+                    },
+                    "lng": {
+                      "type": "number",
+                      "description": "Longitude"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            "address_components": {
+              "type": "array",
+              "description": "Structured address components for country/region/locality resolution",
+              "items": {
+                "type": "object",
+                "required": ["long_name", "short_name", "types"],
+                "properties": {
+                  "long_name": {
+                    "type": "string"
+                  },
+                  "short_name": {
+                    "type": "string"
+                  },
+                  "types": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "additionalProperties": true
+              }
+            }
+          },
+          "additionalProperties": true
+        }
+      ]
+    },
+    "artists": {
+      "type": ["array", "null"],
+      "description": "Artists to add to this date",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Artist name"
+          },
+          "id": {
+            "type": ["integer", "null"],
+            "description": "Existing artist ID, if known"
+          },
+          "mbid": {
+            "type": ["string", "null"],
+            "description": "MusicBrainz artist ID, if known"
+          },
+          "stage": {
+            "type": ["string", "null"],
+            "description": "Stage name or day if multiday festival"
+          },
+          "start_naive": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "Artist set start time in local event time"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "tickets": {
+      "type": ["array", "null"],
+      "description": "List of ticket objects for this event date",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": ["integer", "null"],
+            "description": "Ticket ID (optional; ignored on create)"
+          },
+          "event_id": {
+            "type": ["integer", "null"],
+            "description": "Parent event ID (optional; ignored on create)"
+          },
+          "event_date_id": {
+            "type": ["integer", "null"],
+            "description": "Parent event-date ID (optional; ignored on create)"
+          },
+          "url": {
+            "type": ["string", "null"],
+            "description": "Ticket purchase URL"
+          },
+          "description": {
+            "type": ["string", "null"],
+            "description": "Ticket label or description"
+          },
+          "price_min": {
+            "type": ["number", "null"],
+            "description": "Minimum ticket price"
+          },
+          "price_max": {
+            "type": ["number", "null"],
+            "description": "Maximum ticket price"
+          },
+          "price_currency_code": {
+            "type": ["string", "null"],
+            "description": "Currency code such as USD or NZD"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "lineup_images": {
+      "type": ["array", "null"],
+      "description": "Lineup images to attach to this event date",
+      "items": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Remote image URL"
+          },
+          "base64File": {
+            "type": "string",
+            "description": "Base64-encoded file payload"
+          },
+          "caption": {
+            "type": ["string", "null"],
+            "description": "Optional image caption"
+          },
+          "mimeType": {
+            "type": ["string", "null"],
+            "description": "Optional MIME type metadata"
+          },
+          "fileName": {
+            "type": ["string", "null"],
+            "description": "Optional original filename metadata"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

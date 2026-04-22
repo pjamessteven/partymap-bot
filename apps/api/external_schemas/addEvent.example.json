@@ -1,0 +1,65 @@
+{
+  "name": "Summer Music Festival 2026",
+  "description": "An unforgettable weekend of live music and entertainment",
+  "description_attribute": "description attr",
+  "full_description": "Join us for three days of incredible performances from world-class artists across multiple stages. Experience the best in electronic, indie, and alternative music with camping available on-site.",
+  "full_description_attribute": null,
+  "youtube_url": "https://www.youtube.com/watch?v=2VmFBcsH0zY",
+  "date_time": {
+    "start": "2026-07-15T14:00:00",
+    "end": "2026-07-17T23:00:00"
+  },
+  "location": {
+    "description": "Central Park, New York, NY"
+  },
+  "url": "https://summerfest2026.example.com",
+  "tags": ["music", "festival", "outdoor", "camping"],
+  "logo": {
+    "url": "https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fmarketplace.canva.com%2FEAFMNm9ybqQ%2F1%2F0%2F1600w%2Fcanva-gold-luxury-initial-circle-logo-qRQJCijq_Jw.jpg&f=1&nofb=1&ipt=08aa2933ad1059623bad687e113a8d7fbe82723ad6dab9258da411aebf804095"
+  },
+  "media_items": [
+    {
+      "url": "https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fcdn.lynda.com%2Fcourse%2F546061%2F546061-636330438981800263-16x9.jpg&f=1&nofb=1&ipt=dfe0219e5ea193f609fbc0fe6d8cb0062496a6b214104cf6862bef1955010d8e",
+      "caption": "Main stage at sunset"
+    }
+  ],
+  "rrule": {
+    "recurringType": 3,
+    "separationCount": 1,
+    "dayOfWeek": null,
+    "weekOfMonth": null,
+    "monthOfYear": 7,
+    "dayOfMonth": 15,
+    "exact": true
+  },
+  "next_event_date_description": "Early bird tickets now available!",
+  "next_event_date_description_attribute": null,
+  "next_event_date_size": 50000,
+  "next_event_date_artists": [
+    { "name": "The Headliners" },
+    { "name": "Support Act One" },
+    { "name": "Local Band" }
+  ],
+  "next_event_date_lineup_images": [
+    {
+      "url": "https://example.com/summerfest2026-lineup-poster.jpg",
+      "caption": "Official opening lineup poster"
+    }
+  ],
+  "tickets": [
+    {
+      "url": "https://tickets.example.com/summerfest2026/ga",
+      "description": "General Admission - Weekend Pass",
+      "price_min": 199.99,
+      "price_max": 249.99,
+      "price_currency_code": "USD"
+    },
+    {
+      "url": "https://tickets.example.com/summerfest2026/vip",
+      "description": "VIP Package",
+      "price_min": 499.99,
+      "price_max": 599.99,
+      "price_currency_code": "USD"
+    }
+  ]
+}

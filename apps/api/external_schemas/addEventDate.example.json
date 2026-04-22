@@ -1,0 +1,47 @@
+{
+  "description": "Opening night with extended set times and outdoor projections.",
+  "description_attribute": null,
+  "url": "https://summerfest2026.example.com/opening-night",
+  "size": 12000,
+  "date_time": {
+    "start": "2026-07-15T18:00:00",
+    "end": "2026-07-16T01:00:00"
+  },
+  "location": {
+    "description": "Central Park, New York, NY"
+  },
+  "artists": [
+    {
+      "name": "The Headliners",
+      "stage": "Main Stage",
+      "start_naive": "2026-07-15T22:00:00"
+    },
+    {
+      "name": "Support Act One",
+      "stage": "Main Stage",
+      "start_naive": "2026-07-15T20:30:00"
+    }
+  ],
+  "tickets": [
+    {
+      "url": "https://tickets.example.com/summerfest2026/opening-night/ga",
+      "description": "Opening Night General Admission",
+      "price_min": 79.99,
+      "price_max": 99.99,
+      "price_currency_code": "USD"
+    },
+    {
+      "url": "https://tickets.example.com/summerfest2026/opening-night/vip",
+      "description": "Opening Night VIP",
+      "price_min": 199.99,
+      "price_max": 249.99,
+      "price_currency_code": "USD"
+    }
+  ],
+  "lineup_images": [
+    {
+      "url": "https://example.com/opening-night-lineup.jpg",
+      "caption": "Opening night lineup poster"
+    }
+  ]
+}

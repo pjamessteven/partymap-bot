@@ -1,0 +1,30 @@
+{
+  "name": "partymap-bot",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "docker-compose up -d",
+    "dev:logs": "docker-compose up",
+    "build": "docker-compose build",
+    "stop": "docker-compose down",
+    "init": "docker-compose exec api python scripts/init_db.py",
+    "api:dev": "cd apps/api && uvicorn src.main:app --reload",
+    "web:dev": "cd apps/web && npm run dev",
+    "typecheck": "cd apps/web && npm run typecheck"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "dependencies": {
+    "@streamdown/cjk": "^1.0.3",
+    "@streamdown/code": "^1.1.1",
+    "@streamdown/math": "^1.0.2",
+    "@streamdown/mermaid": "^1.0.2",
+    "ai": "^6.0.168",
+    "streamdown": "^2.5.0",
+    "use-stick-to-bottom": "^1.1.3"
+  }
+}
