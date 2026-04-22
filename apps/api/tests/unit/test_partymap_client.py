@@ -9,7 +9,7 @@ import respx
 from httpx import Response
 
 from src.config import Settings
-from src.core.schemas import EventDate, ResearchedFestival
+from src.core.schemas import EventDateData, ResearchedFestival
 from src.partymap.client import PartyMapClient
 
 
@@ -168,7 +168,7 @@ class TestPartyMapClient:
             description="A test festival",
             full_description="Full description",
             event_dates=[
-                EventDate(
+                EventDateData(
                     start=datetime(2026, 7, 15, 14, 0, 0),
                     end=datetime(2026, 7, 17, 23, 0, 0),
                     location_description="Berlin, Germany",
@@ -204,7 +204,7 @@ class TestPartyMapClient:
             return_value=Response(201)
         )
 
-        event_date = EventDate(
+        event_date = EventDateData(
             start=datetime(2027, 7, 15, 14, 0, 0),
             end=datetime(2027, 7, 17, 23, 0, 0),
             location_description="Berlin, Germany",
@@ -227,7 +227,7 @@ class TestPartyMapClient:
             name="Updated Festival Name",
             description="Updated description",
             event_dates=[
-                EventDate(
+                EventDateData(
                     start=datetime(2026, 7, 15, 14, 0, 0),
                     location_description="Berlin, Germany",
                 )

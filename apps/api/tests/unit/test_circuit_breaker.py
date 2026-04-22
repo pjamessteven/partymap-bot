@@ -219,14 +219,14 @@ class TestCircuitBreakerMetrics:
             return "ok"
         
         async def fail():
-            raise ValueError("err")
-        
+            raise RuntimeError("err")
+
         await cb.call(success)
         await cb.call(success)
-        
-        with pytest.raises(ValueError):
+
+        with pytest.raises(RuntimeError):
             await cb.call(fail)
-        
+
         metrics = cb.metrics
         assert metrics.total_calls == 3
         assert metrics.total_successes == 2

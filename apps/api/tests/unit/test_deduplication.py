@@ -7,9 +7,9 @@ from uuid import uuid4
 import pytest
 
 from src.config import Settings
-from src.core.schemas import EventDate, ResearchedFestival
+from src.core.schemas import EventDateData, ResearchedFestival
 from src.partymap.client import PartyMapClient
-from src.partymap.deduplication import DeduplicationEngine
+from src.agents.deduplication import DeduplicationAgent
 
 
 @pytest.fixture
@@ -28,10 +28,10 @@ def mock_client(mock_settings):
 @pytest.fixture
 def dedup_engine(mock_client, mock_settings):
     """Create deduplication engine."""
-    return DeduplicationEngine(mock_client, mock_settings)
+    return DeduplicationAgent(mock_client, mock_settings)
 
 
-class TestDeduplicationEngine:
+class TestDeduplicationAgent:
     """Test deduplication logic."""
 
     @pytest.mark.asyncio
@@ -42,7 +42,7 @@ class TestDeduplicationEngine:
         festival = ResearchedFestival(
             name="Brand New Festival",
             event_dates=[
-                EventDate(
+                EventDateData(
                     start=datetime(2026, 7, 15),
                     location_description="Berlin",
                 )
@@ -76,7 +76,7 @@ class TestDeduplicationEngine:
         festival = ResearchedFestival(
             name="Existing Festival",
             event_dates=[
-                EventDate(
+                EventDateData(
                     start=datetime(2026, 7, 15),
                     location_description="Berlin",
                 )
@@ -111,7 +111,7 @@ class TestDeduplicationEngine:
         festival = ResearchedFestival(
             name="Existing Festival",
             event_dates=[
-                EventDate(
+                EventDateData(
                     start=datetime(2026, 7, 15),
                     location_description="Berlin",
                 )
@@ -146,7 +146,7 @@ class TestDeduplicationEngine:
         festival = ResearchedFestival(
             name="Festival Series",
             event_dates=[
-                EventDate(
+                EventDateData(
                     start=datetime(2027, 7, 15),  # Different year
                     location_description="Berlin",
                 )
@@ -173,7 +173,7 @@ class TestDeduplicationEngine:
         festival = ResearchedFestival(
             name="Test",
             event_dates=[
-                EventDate(
+                EventDateData(
                     start=datetime(2026, 7, 15, 14, 0, 0),
                     location_description="Berlin",
                 )
@@ -197,7 +197,7 @@ class TestDeduplicationEngine:
         festival = ResearchedFestival(
             name="Test",
             event_dates=[
-                EventDate(
+                EventDateData(
                     start=datetime(2026, 7, 15, 14, 0, 0),
                     location_description="Hamburg, Germany",
                 )
@@ -221,7 +221,7 @@ class TestDeduplicationEngine:
         festival = ResearchedFestival(
             name="Test",
             event_dates=[
-                EventDate(
+                EventDateData(
                     start=datetime(2027, 7, 15, 14, 0, 0),  # Next year
                     location_description="Berlin, Germany",
                 )
@@ -246,7 +246,7 @@ class TestDeduplicationEngine:
 
         festival = ResearchedFestival(
             name="New Festival",
-            event_dates=[EventDate(start=datetime(2026, 7, 15), location_description="Berlin")],
+            event_dates=[EventDateData(start=datetime(2026, 7, 15), location_description="Berlin")],
         )
 
         result = await dedup_engine.sync_festival(festival, False, None, "new")
@@ -262,7 +262,7 @@ class TestDeduplicationEngine:
 
         festival = ResearchedFestival(
             name="Updated Festival",
-            event_dates=[EventDate(start=datetime(2026, 7, 15), location_description="Berlin")],
+            event_dates=[EventDateData(start=datetime(2026, 7, 15), location_description="Berlin")],
         )
 
         result = await dedup_engine.sync_festival(festival, True, existing_id, "update")
@@ -278,7 +278,7 @@ class TestDeduplicationEngine:
 
         festival = ResearchedFestival(
             name="Festival",
-            event_dates=[EventDate(start=datetime(2027, 7, 15), location_description="Berlin")],
+            event_dates=[EventDateData(start=datetime(2027, 7, 15), location_description="Berlin")],
         )
 
         result = await dedup_engine.sync_festival(festival, True, existing_id, "add_date")

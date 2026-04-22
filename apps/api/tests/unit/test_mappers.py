@@ -5,7 +5,7 @@ from decimal import Decimal
 
 import pytest
 
-from src.core.schemas import EventDate, MediaItem, ResearchedFestival, TicketInfo
+from src.core.schemas import EventDateData, MediaItem, ResearchedFestival, TicketInfo
 from src.partymap.mappers import FestivalMapper, GoabaseMapper
 
 
@@ -22,7 +22,7 @@ class TestFestivalMapper:
             logo_url="https://example.com/logo.jpg",
             tags=["psytrance", "outdoor"],
             event_dates=[
-                EventDate(
+                EventDateData(
                     start=datetime(2026, 7, 15, 14, 0, 0),
                     end=datetime(2026, 7, 17, 23, 0, 0),
                     location_description="Berlin, Germany",
@@ -67,7 +67,7 @@ class TestFestivalMapper:
 
     def test_to_add_event_date_request(self):
         """Test mapping event date request."""
-        event_date = EventDate(
+        event_date = EventDateData(
             start=datetime(2026, 7, 15, 14, 0, 0),
             end=datetime(2026, 7, 17, 23, 0, 0),
             location_description="Berlin, Germany",
@@ -88,7 +88,7 @@ class TestFestivalMapper:
             name="Updated Name",
             description="Updated description",
             event_dates=[
-                EventDate(
+                EventDateData(
                     start=datetime(2026, 7, 15, 14, 0, 0),
                     location_description="Berlin",
                 )
