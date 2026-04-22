@@ -10,30 +10,46 @@ import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { getStateColor, getStateLabel, formatRelativeTime } from '@/lib/utils'
 import Link from 'next/link'
-import { Search, RefreshCw, PlayCircle } from 'lucide-react'
+import { Search, RefreshCw, PlayCircle, ArrowUpDown } from 'lucide-react'
 import type { FestivalState } from '@/types'
+import { ValidationBadge, RetryCountBadge } from '@/components/ValidationBadge'
+import { TagList, extractTagsFromResearchData } from '@/components/agents/TagBadge'
+import { StateBadge } from '@/components/state-badge'
 
 const states: FestivalState[] = [
   'discovered',
+  'needs_research_new',
+  'needs_research_update',
   'researching',
   'researched',
+  'researched_partial',
+  'update_in_progress',
+  'update_complete',
   'syncing',
   'synced',
+  'validating',
+  'validation_failed',
+  'quarantined',
   'failed',
   'skipped',
   'needs_review',
 ]
 
+type SortField = 'created_at' | 'retry_count' | 'name' | 'validation_status'
+type SortDirection = 'asc' | 'desc'
+
 export default function FestivalsPage() {
   const [search, setSearch] = useState('')
   const [state, setState] = useState('')
   const [offset, setOffset] = useState(0)
+  const [sortField, setSortField] = useState<SortField>('created_at')
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
   const [bulkResult, setBulkResult] = useState<any>(null)
   const limit = 20
   const queryClient = useQueryClient()
 
   const { data, isLoading, refetch } = useQuery({
-    queryKey: ['festivals', { search, state, offset, limit }],
+    queryKey: ['festivals', { search, state, offset, limit, sortField, sortDirection }],
     queryFn: () =>
       getFestivals({
         search: search || undefined,
@@ -43,14 +59,32 @@ export default function FestivalsPage() {
       }),
   })
 
+  // Client-side sorting for fields not supported by API
+  const sortedFestivals = data?.festivals
+    ? [...data.festivals].sort((a: any, b: any) => {
+        const dir = sortDirection === 'asc' ? 1 : -1
+        if (sortField === 'retry_count') {
+          return ((a.retry_count || 0) - (b.retry_count || 0)) * dir
+        }
+        if (sortField === 'name') {
+          return (a.name || '').localeCompare(b.name || '') * dir
+        }
+        if (sortField === 'validation_status') {
+          const order = ['ready', 'needs_review', 'invalid', 'pending']
+          const aIdx = order.indexOf(a.validation_status || 'pending')
+          const bIdx = order.indexOf(b.validation_status || 'pending')
+          return (aIdx - bIdx) * dir
+        }
+        return 0
+      })
+    : data?.festivals
+
   const bulkResearchMutation = useMutation({
     mutationFn: bulkResearchFestivals,
     onSuccess: (result) => {
       setBulkResult(result)
       queryClient.invalidateQueries({ queryKey: ['festivals'] })
       queryClient.invalidateQueries({ queryKey: ['stats'] })
-      
-      // Clear result after 5 seconds
       setTimeout(() => setBulkResult(null), 5000)
     },
   })
@@ -59,6 +93,15 @@ export default function FestivalsPage() {
     e.preventDefault()
     setOffset(0)
     refetch()
+  }
+
+  const toggleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortField(field)
+      setSortDirection('desc')
+    }
   }
 
   return (
@@ -153,13 +196,35 @@ export default function FestivalsPage() {
             <div className="text-center py-8 text-muted-foreground">
               Loading...
             </div>
-          ) : data?.festivals.length === 0 ? (
+          ) : sortedFestivals?.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               No festivals found
             </div>
           ) : (
             <div className="space-y-2">
-              {data?.festivals.map((festival) => (
+              {/* Header row with sort buttons */}
+              <div className="flex items-center justify-between px-4 py-2 text-sm text-muted-foreground border-b">
+                <div className="flex-1">Festival</div>
+                <div className="flex items-center gap-4">
+                  <button
+                    onClick={() => toggleSort('validation_status')}
+                    className="flex items-center gap-1 hover:text-foreground transition-colors"
+                  >
+                    Validation
+                    <ArrowUpDown className="h-3 w-3" />
+                  </button>
+                  <button
+                    onClick={() => toggleSort('retry_count')}
+                    className="flex items-center gap-1 hover:text-foreground transition-colors"
+                  >
+                    Retries
+                    <ArrowUpDown className="h-3 w-3" />
+                  </button>
+                  <span>State</span>
+                </div>
+              </div>
+
+              {sortedFestivals?.map((festival: any) => (
                 <Link
                   key={festival.id}
                   href={`/festivals/${festival.id}`}
@@ -179,18 +244,14 @@ export default function FestivalsPage() {
                       </p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-4">
-                    {festival.retry_count > 0 && (
-                      <Badge variant="destructive">
-                        {festival.retry_count} retries
-                      </Badge>
+                  <div className="flex items-center gap-3">
+                    {festival.validation_status && festival.validation_status !== 'pending' && (
+                      <ValidationBadge status={festival.validation_status} showLabel={false} />
                     )}
-                    <Badge
-                      variant="secondary"
-                      className={`${getStateColor(festival.state)} text-white`}
-                    >
-                      {getStateLabel(festival.state)}
-                    </Badge>
+                    {festival.retry_count > 0 && (
+                      <RetryCountBadge count={festival.retry_count} />
+                    )}
+                    <StateBadge state={festival.state} />
                   </div>
                 </Link>
               ))}

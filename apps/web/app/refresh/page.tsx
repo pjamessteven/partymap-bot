@@ -15,71 +15,28 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  getRefreshApprovals,
+  approveRefresh,
+  rejectRefresh,
+  triggerRefresh,
+} from "@/lib/api";
+import type { RefreshApproval } from "@/lib/api";
+import {
   CheckCircle,
   XCircle,
   RefreshCw,
   Clock,
   AlertTriangle,
 } from "lucide-react";
-import { formatRelativeTime } from "@/lib/utils";
-
-interface RefreshApproval {
-  id: string;
-  event_id: number;
-  event_date_id: number;
-  event_name: string;
-  status: "pending" | "auto_approved" | "approved" | "rejected" | "applied";
-  change_summary: string[];
-  research_confidence: number;
-  current_data: {
-    event?: Record<string, unknown>;
-    event_date?: Record<string, unknown>;
-  };
-  proposed_changes: {
-    event?: Record<string, unknown>;
-    event_date?: Record<string, unknown>;
-  };
-  created_at: string;
-}
-
-async function getRefreshApprovals(
-  status?: string,
-): Promise<{ items: RefreshApproval[] }> {
-  const params = new URLSearchParams();
-  if (status) params.set("status", status);
-  const response = await fetch(`/api/refresh/approvals?${params}`);
-  return response.json();
-}
-
-async function approveRefresh(approvalId: string): Promise<void> {
-  const response = await fetch(`/api/refresh/approvals/${approvalId}/approve`, {
-    method: "POST",
-  });
-  if (!response.ok) throw new Error("Failed to approve");
-}
-
-async function rejectRefresh(
-  approvalId: string,
-  reason?: string,
-): Promise<void> {
-  const response = await fetch(`/api/refresh/approvals/${approvalId}/reject`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ reason }),
-  });
-  if (!response.ok) throw new Error("Failed to reject");
-}
-
-async function triggerRefresh(): Promise<void> {
-  const response = await fetch("/api/refresh/trigger", { method: "POST" });
-  if (!response.ok) throw new Error("Failed to trigger");
-}
+import { formatRelativeTime, cn } from "@/lib/utils";
+import { useToast } from "@/components/ui/toast-provider";
 
 export default function RefreshPage() {
   const queryClient = useQueryClient();
   const [selectedApproval, setSelectedApproval] =
     useState<RefreshApproval | null>(null);
   const [filter, setFilter] = useState<string>("pending");
+  const { success, error } = useToast();
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["refresh-approvals", filter],
@@ -91,7 +48,9 @@ export default function RefreshPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["refresh-approvals"] });
       setSelectedApproval(null);
+      success("Approval accepted");
     },
+    onError: () => error("Failed to approve"),
   });
 
   const rejectMutation = useMutation({
@@ -100,14 +59,18 @@ export default function RefreshPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["refresh-approvals"] });
       setSelectedApproval(null);
+      success("Approval rejected");
     },
+    onError: () => error("Failed to reject"),
   });
 
   const triggerMutation = useMutation({
     mutationFn: triggerRefresh,
     onSuccess: () => {
       setTimeout(() => refetch(), 2000);
+      success("Refresh triggered");
     },
+    onError: () => error("Failed to trigger refresh"),
   });
 
   const getStatusBadge = (status: string) => {
@@ -323,6 +286,4 @@ export default function RefreshPage() {
   );
 }
 
-function cn(...classes: (string | boolean | undefined)[]) {
-  return classes.filter(Boolean).join(" ");
-}
+

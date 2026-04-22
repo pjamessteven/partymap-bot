@@ -1,12 +1,11 @@
 'use client'
 
-// WORKING - This comment tests if hot reloading is working
 import { useQuery } from '@tanstack/react-query'
 import { getStats, getPendingFestivals, getJobsStatus } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { formatCurrency, getStateColor, getStateLabel, formatRelativeTime } from '@/lib/utils'
+import { formatCurrency, getStateColor, getStateLabel, formatRelativeTime, cn } from '@/lib/utils'
 import {
   Music,
   DollarSign,
@@ -20,10 +19,13 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { useState } from 'react'
-import { runDiscovery, startDiscoveryJob, stopDiscoveryJob, startResearchJob, startSyncJob } from '@/lib/api'
+import { runDiscovery } from '@/lib/api'
+import { useToast } from '@/components/ui/toast-provider'
+import { StateBadge } from '@/components/state-badge'
 
 export default function DashboardPage() {
   const [isRunningDiscovery, setIsRunningDiscovery] = useState(false)
+  const { success, error } = useToast()
 
   const { data: stats, refetch: refetchStats } = useQuery({
     queryKey: ['stats'],
@@ -45,8 +47,10 @@ export default function DashboardPage() {
     try {
       await runDiscovery()
       refetchStats()
-    } catch (error) {
-      console.error('Failed to run discovery:', error)
+      success('Discovery started successfully')
+    } catch (err) {
+      console.error('Failed to run discovery:', err)
+      error('Failed to start discovery')
     } finally {
       setIsRunningDiscovery(false)
     }
@@ -57,7 +61,7 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Dashboard HR WORKS</h1>
+        <h1 className="text-3xl font-bold">Dashboard</h1>
         <Button
           onClick={handleRunDiscovery}
           disabled={isRunningDiscovery}
@@ -126,13 +130,9 @@ export default function DashboardPage() {
               const count = stats.by_state[state as keyof typeof stats.by_state] ?? 0
               if (count === 0) return null
               return (
-                <Badge
-                  key={state}
-                  variant="secondary"
-                  className={`${getStateColor(state)} text-white gap-1`}
-                >
-                  {getStateLabel(state)}: {count}
-                </Badge>
+                <StateBadge key={state} state={state}>
+                  {count}
+                </StateBadge>
               )
             })}
           </div>
@@ -210,14 +210,4 @@ export default function DashboardPage() {
   )
 }
 
-// Helper for the cn function used in this file
-function cn(...classes: (string | boolean | undefined)[]) {
-  return classes.filter(Boolean).join(' ')
-}
-// TEST 1776816156
-// WORKING 2 1776816247
-// WORKING 3 1776816346
-// TURBO WORKING 1776816472
-// TEST 1776816715
-// HR WORKS 1776817849
-// TEST 1776818107
+

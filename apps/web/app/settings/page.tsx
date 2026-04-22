@@ -15,6 +15,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Check, X, Save, RotateCcw } from 'lucide-react'
 import { GoabaseSyncPanel } from '@/components/GoabaseSyncPanel'
+import { PipelineControlPanel } from '@/components/PipelineControlPanel'
+import { useToast } from '@/components/ui/toast-provider'
 import type { SettingCategory } from '@/types'
 
 const categoryLabels: Record<string, string> = {
@@ -29,6 +31,7 @@ export default function SettingsPage() {
   const queryClient = useQueryClient()
   const [editing, setEditing] = useState<string | null>(null)
   const [editValue, setEditValue] = useState<unknown>(null)
+  const { success, error } = useToast()
 
   const { data: settings, isLoading } = useQuery({
     queryKey: ['settings'],
@@ -46,7 +49,9 @@ export default function SettingsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['settings'] })
       setEditing(null)
+      success('Setting updated')
     },
+    onError: () => error('Failed to update setting'),
   })
 
   const enableAutoMutation = useMutation({
@@ -54,7 +59,9 @@ export default function SettingsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['auto-process'] })
       queryClient.invalidateQueries({ queryKey: ['settings'] })
+      success('Auto-process enabled')
     },
+    onError: () => error('Failed to enable auto-process'),
   })
 
   const disableAutoMutation = useMutation({
@@ -62,7 +69,9 @@ export default function SettingsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['auto-process'] })
       queryClient.invalidateQueries({ queryKey: ['settings'] })
+      success('Auto-process disabled')
     },
+    onError: () => error('Failed to disable auto-process'),
   })
 
   const startEditing = (key: string, value: unknown) => {
@@ -199,6 +208,9 @@ export default function SettingsPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Pipeline Control Panel */}
+      <PipelineControlPanel />
 
       {/* Goabase Sync Panel */}
       <GoabaseSyncPanel />

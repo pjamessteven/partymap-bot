@@ -1,13 +1,21 @@
 // Types generated from OpenAPI spec
 
-export type FestivalState = 
-  | 'discovered' 
-  | 'researching' 
-  | 'researched' 
-  | 'syncing' 
-  | 'synced' 
-  | 'failed' 
-  | 'skipped' 
+export type FestivalState =
+  | 'discovered'
+  | 'needs_research_new'
+  | 'needs_research_update'
+  | 'researching'
+  | 'researched'
+  | 'researched_partial'
+  | 'update_in_progress'
+  | 'update_complete'
+  | 'syncing'
+  | 'synced'
+  | 'validating'
+  | 'validation_failed'
+  | 'quarantined'
+  | 'failed'
+  | 'skipped'
   | 'needs_review';
 
 export type FestivalAction = 
@@ -58,6 +66,9 @@ export interface Festival {
   discovered_data?: Record<string, unknown>;
   research_data?: Record<string, unknown>;
   current_thread_id?: string;
+  failure_reason?: string | null;
+  failure_message?: string | null;
+  research_completeness_score?: number;
   created_at: string;
   updated_at: string;
 }
@@ -270,4 +281,98 @@ export interface GoabaseSettings {
   goabase_sync_frequency: 'daily' | 'weekly' | 'monthly';
   goabase_sync_day: 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
   goabase_sync_hour: number;
+}
+
+// Validation Types
+export type ValidationStatus = 'pending' | 'ready' | 'needs_review' | 'invalid';
+
+export type ErrorCategory =
+  | 'transient'
+  | 'permanent'
+  | 'validation'
+  | 'external'
+  | 'budget'
+  | 'unknown';
+
+export interface ValidationError {
+  field: string;
+  message: string;
+  severity: 'error' | 'warning';
+}
+
+export interface ValidationResult {
+  is_valid: boolean;
+  status: ValidationStatus;
+  completeness_score: number;
+  errors: ValidationError[];
+  warnings: ValidationError[];
+  missing_fields: string[];
+}
+
+export interface ErrorContext {
+  category: ErrorCategory;
+  message: string;
+  exception_type?: string;
+  service?: string;
+  operation?: string;
+  status_code?: number;
+  retry_count: number;
+  max_retries: number;
+  is_retryable: boolean;
+  timestamp: string;
+  first_error_at?: string;
+  metadata?: Record<string, unknown>;
+}
+
+// Extended Festival with validation and error tracking
+export interface FestivalWithValidation extends Festival {
+  validation_status: ValidationStatus;
+  validation_errors: ValidationError[];
+  validation_warnings: ValidationError[];
+  validation_checked_at?: string;
+  error_category?: ErrorCategory;
+  error_context?: ErrorContext;
+  first_error_at?: string;
+  last_retry_at?: string;
+  max_retries_reached: boolean;
+  quarantined_at?: string;
+  quarantine_reason?: string;
+}
+
+// Dead Letter Queue Types
+export interface DLQStats {
+  total_quarantined: number;
+  by_category: Record<ErrorCategory, number>;
+  expiring_soon: number;
+  retention_days: number;
+}
+
+export interface DLQRetryResult {
+  festival_id: string;
+  success: boolean;
+  message: string;
+  new_state?: FestivalState;
+}
+
+export interface DLQBulkRetryResult {
+  total: number;
+  successful: number;
+  failed: number;
+  details: DLQRetryResult[];
+}
+
+// Circuit Breaker Types
+export type CircuitState = 'closed' | 'open' | 'half_open';
+
+export interface CircuitBreakerMetrics {
+  state: CircuitState;
+  failure_count: number;
+  success_count: number;
+  last_failure_time?: string;
+  last_success_time?: string;
+  opened_at?: string;
+  closed_at?: string;
+  total_calls: number;
+  total_failures: number;
+  total_successes: number;
 }

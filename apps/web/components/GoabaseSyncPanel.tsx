@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
+import type { GoabaseSettings } from '@/types'
 import { Play, Square, RefreshCw, Settings2 } from 'lucide-react'
 
 export function GoabaseSyncPanel() {
@@ -20,10 +21,10 @@ export function GoabaseSyncPanel() {
   const [showSettings, setShowSettings] = useState(false)
 
   // Queries
-  const { data: status, isLoading: statusLoading } = useQuery({
+  const { data: syncStatus, isLoading: statusLoading } = useQuery({
     queryKey: ['goabase-status'],
     queryFn: getGoabaseSyncStatus,
-    refetchInterval: status?.is_running ? 2000 : false, // Poll every 2s when running
+    refetchInterval: 2000,
   })
 
   const { data: settings } = useQuery({
@@ -54,8 +55,8 @@ export function GoabaseSyncPanel() {
     },
   })
 
-  const isRunning = status?.is_running
-  const progress = status?.progress_percentage || 0
+  const isRunning = syncStatus?.is_running
+  const progress = syncStatus?.progress_percentage || 0
 
   return (
     <Card>
@@ -114,50 +115,50 @@ export function GoabaseSyncPanel() {
                   <span>{progress}%</span>
                 </div>
                 <Progress value={progress} />
-                {status?.current_operation && (
+                {syncStatus?.current_operation && (
                   <p className="text-sm text-muted-foreground">
-                    {status.current_operation}
+                    {syncStatus.current_operation}
                   </p>
                 )}
               </div>
             )}
 
             {/* Results */}
-            {status?.completed_at && !isRunning && (
-              <div className="grid grid-cols-4 gap-4 text-center">
-                <div className="space-y-1">
-                  <div className="text-2xl font-bold text-green-600">
-                    {status.new_count}
+                {syncStatus?.completed_at && !isRunning && (
+                  <div className="grid grid-cols-4 gap-4 text-center">
+                    <div className="space-y-1">
+                      <div className="text-2xl font-bold text-green-600">
+                        {syncStatus.new_count}
+                      </div>
+                      <div className="text-xs text-muted-foreground">New</div>
+                    </div>
+                    <div className="space-y-1">
+                      <div className="text-2xl font-bold text-blue-600">
+                        {syncStatus.update_count}
+                      </div>
+                      <div className="text-xs text-muted-foreground">Updates</div>
+                    </div>
+                    <div className="space-y-1">
+                      <div className="text-2xl font-bold text-gray-600">
+                        {syncStatus.unchanged_count}
+                      </div>
+                      <div className="text-xs text-muted-foreground">Unchanged</div>
+                    </div>
+                    <div className="space-y-1">
+                      <div className="text-2xl font-bold text-red-600">
+                        {syncStatus.error_count}
+                      </div>
+                      <div className="text-xs text-muted-foreground">Errors</div>
+                    </div>
                   </div>
-                  <div className="text-xs text-muted-foreground">New</div>
-                </div>
-                <div className="space-y-1">
-                  <div className="text-2xl font-bold text-blue-600">
-                    {status.update_count}
-                  </div>
-                  <div className="text-xs text-muted-foreground">Updates</div>
-                </div>
-                <div className="space-y-1">
-                  <div className="text-2xl font-bold text-gray-600">
-                    {status.unchanged_count}
-                  </div>
-                  <div className="text-xs text-muted-foreground">Unchanged</div>
-                </div>
-                <div className="space-y-1">
-                  <div className="text-2xl font-bold text-red-600">
-                    {status.error_count}
-                  </div>
-                  <div className="text-xs text-muted-foreground">Errors</div>
-                </div>
-              </div>
-            )}
+                )}
 
-            {/* Last run */}
-            {status?.completed_at && (
-              <p className="text-sm text-muted-foreground">
-                Last completed: {new Date(status.completed_at).toLocaleString()}
-              </p>
-            )}
+                {/* Last run */}
+                {syncStatus?.completed_at && (
+                  <p className="text-sm text-muted-foreground">
+                    Last completed: {new Date(syncStatus.completed_at).toLocaleString()}
+                  </p>
+                )}
           </>
         )}
 
@@ -188,7 +189,7 @@ export function GoabaseSyncPanel() {
                   value={settings.goabase_sync_frequency}
                   onChange={(e) =>
                     updateSettingsMutation.mutate({
-                      goabase_sync_frequency: e.target.value,
+                      goabase_sync_frequency: e.target.value as GoabaseSettings['goabase_sync_frequency'],
                     })
                   }
                 >
@@ -204,7 +205,7 @@ export function GoabaseSyncPanel() {
                   value={settings.goabase_sync_day}
                   onChange={(e) =>
                     updateSettingsMutation.mutate({
-                      goabase_sync_day: e.target.value,
+                      goabase_sync_day: e.target.value as GoabaseSettings['goabase_sync_day'],
                     })
                   }
                 >

@@ -214,6 +214,7 @@ export default function QueriesPage() {
                               size="sm"
                               variant="ghost"
                               onClick={() => startEditing(query)}
+                              aria-label="Edit query"
                             >
                               <Edit2 className="h-4 w-4" />
                             </Button>
@@ -223,6 +224,7 @@ export default function QueriesPage() {
                                 variant="outline"
                                 onClick={() => disableMutation.mutate(query.id)}
                                 disabled={disableMutation.isPending}
+                                aria-label="Disable query"
                               >
                                 <X className="h-4 w-4" />
                               </Button>
@@ -232,6 +234,7 @@ export default function QueriesPage() {
                                 variant="outline"
                                 onClick={() => enableMutation.mutate(query.id)}
                                 disabled={enableMutation.isPending}
+                                aria-label="Enable query"
                               >
                                 <Check className="h-4 w-4" />
                               </Button>
@@ -250,6 +253,7 @@ export default function QueriesPage() {
                                 }
                               }}
                               disabled={deleteMutation.isPending}
+                              aria-label="Delete query"
                             >
                               <Trash2 className="h-4 w-4" />
                             </Button>

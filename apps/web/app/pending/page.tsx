@@ -11,6 +11,8 @@ import { getStateColor, getStateLabel, getActionLabel, formatRelativeTime } from
 import Link from 'next/link'
 import { RefreshCw, Search, RotateCcw, Upload, ExternalLink } from 'lucide-react'
 import type { FestivalState, FestivalAction } from '@/types'
+import { useToast } from '@/components/ui/toast-provider'
+import { StateBadge } from '@/components/state-badge'
 
 const states: FestivalState[] = [
   'discovered',
@@ -22,6 +24,7 @@ const states: FestivalState[] = [
 export default function PendingPage() {
   const [state, setState] = useState('')
   const queryClient = useQueryClient()
+  const { success, error } = useToast()
 
   const { data: pending, isLoading, refetch } = useQuery({
     queryKey: ['pending', state],
@@ -36,17 +39,29 @@ export default function PendingPage() {
 
   const dedupMutation = useMutation({
     mutationFn: (id: string) => deduplicateFestival(id),
-    onSuccess: invalidateAll,
+    onSuccess: () => {
+      invalidateAll()
+      success('Deduplication started')
+    },
+    onError: () => error('Deduplication failed'),
   })
 
   const researchMutation = useMutation({
     mutationFn: (id: string) => researchFestival(id),
-    onSuccess: invalidateAll,
+    onSuccess: () => {
+      invalidateAll()
+      success('Research started')
+    },
+    onError: () => error('Research failed'),
   })
 
   const syncMutation = useMutation({
     mutationFn: (id: string) => syncFestival(id),
-    onSuccess: invalidateAll,
+    onSuccess: () => {
+      invalidateAll()
+      success('Sync started')
+    },
+    onError: () => error('Sync failed'),
   })
 
   const handleAction = (festivalId: string, action: FestivalAction) => {
@@ -181,7 +196,7 @@ export default function PendingPage() {
                         {getActionLabel(item.suggested_action)}
                       </Button>
                       <Link href={`/festivals/${item.festival_id}`}>
-                        <Button variant="ghost" size="sm">
+                        <Button variant="ghost" size="sm" aria-label="View festival details">
                           <ExternalLink className="h-4 w-4" />
                         </Button>
                       </Link>

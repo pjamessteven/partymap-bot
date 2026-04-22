@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { formatDate, formatRelativeTime } from '@/lib/utils'
 import { useState } from 'react'
+import { useToast } from '@/components/ui/toast-provider'
 import {
   Check,
   X,
@@ -40,8 +41,9 @@ export default function SchedulePage() {
     minute: 0,
     day_of_week: '',
   })
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
+  const [pageError, setPageError] = useState<string | null>(null)
+  const [pageSuccess, setPageSuccess] = useState<string | null>(null)
+  const { success: toastSuccess, error: toastError } = useToast()
 
   const { data: schedules, isLoading, refetch } = useQuery({
     queryKey: ['schedules'],
@@ -49,19 +51,19 @@ export default function SchedulePage() {
   })
 
   const clearMessages = () => {
-    setError(null)
-    setSuccess(null)
+    setPageError(null)
+    setPageSuccess(null)
   }
 
   const enableMutation = useMutation({
     mutationFn: enableSchedule,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['schedules'] })
-      setSuccess('Schedule enabled successfully')
-      setTimeout(clearMessages, 3000)
+      toastSuccess('Schedule enabled successfully')
     },
     onError: (err: Error) => {
-      setError(err.message || 'Failed to enable schedule')
+      setPageError(err.message || 'Failed to enable schedule')
+      toastError('Failed to enable schedule')
     },
   })
 
@@ -69,11 +71,11 @@ export default function SchedulePage() {
     mutationFn: disableSchedule,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['schedules'] })
-      setSuccess('Schedule disabled successfully')
-      setTimeout(clearMessages, 3000)
+      toastSuccess('Schedule disabled successfully')
     },
     onError: (err: Error) => {
-      setError(err.message || 'Failed to disable schedule')
+      setPageError(err.message || 'Failed to disable schedule')
+      toastError('Failed to disable schedule')
     },
   })
 
@@ -83,11 +85,11 @@ export default function SchedulePage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['schedules'] })
       setEditing(null)
-      setSuccess('Schedule updated successfully')
-      setTimeout(clearMessages, 3000)
+      toastSuccess('Schedule updated successfully')
     },
     onError: (err: Error) => {
-      setError(err.message || 'Failed to update schedule')
+      setPageError(err.message || 'Failed to update schedule')
+      toastError('Failed to update schedule')
     },
   })
 
@@ -95,11 +97,11 @@ export default function SchedulePage() {
     mutationFn: applyScheduleChanges,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['schedules'] })
-      setSuccess('Schedule changes applied successfully')
-      setTimeout(clearMessages, 3000)
+      toastSuccess('Schedule changes applied successfully')
     },
     onError: (err: Error) => {
-      setError(err.message || 'Failed to apply schedule changes')
+      setPageError(err.message || 'Failed to apply schedule changes')
+      toastError('Failed to apply schedule changes')
     },
   })
 
@@ -107,11 +109,11 @@ export default function SchedulePage() {
     mutationFn: runTaskNow,
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['schedules'] })
-      setSuccess(`Task "${data.task_type}" started successfully`)
-      setTimeout(clearMessages, 3000)
+      toastSuccess(`Task "${data.task_type}" started successfully`)
     },
     onError: (err: Error) => {
-      setError(err.message || 'Failed to run task')
+      setPageError(err.message || 'Failed to run task')
+      toastError('Failed to run task')
     },
   })
 
@@ -176,19 +178,19 @@ export default function SchedulePage() {
         </div>
       </div>
 
-      {error && (
+      {pageError && (
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
           <AlertTitle>Error</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{pageError}</AlertDescription>
         </Alert>
       )}
 
-      {success && (
+      {pageSuccess && (
         <Alert className="border-green-500 text-green-700">
           <Check className="h-4 w-4" />
           <AlertTitle>Success</AlertTitle>
-          <AlertDescription>{success}</AlertDescription>
+          <AlertDescription>{pageSuccess}</AlertDescription>
         </Alert>
       )}
 

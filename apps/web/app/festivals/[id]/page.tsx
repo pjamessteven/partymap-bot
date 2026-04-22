@@ -31,12 +31,14 @@ import {
 } from 'lucide-react'
 import type { FestivalState } from '@/types'
 import { AgentStreamViewer } from '@/components/AgentStreamViewer'
+import { useToast } from '@/components/ui/toast-provider'
 
 export default function FestivalDetailPage() {
   const params = useParams()
   const id = params.id as string
   const queryClient = useQueryClient()
   const [actionError, setActionError] = useState<string | null>(null)
+  const { success, error: toastError } = useToast()
 
   const { data: festival, isLoading } = useQuery({
     queryKey: ['festival', id],
@@ -51,44 +53,86 @@ export default function FestivalDetailPage() {
 
   const dedupMutation = useMutation({
     mutationFn: () => deduplicateFestival(id),
-    onSuccess: invalidateFestival,
-    onError: (error: Error) => setActionError(error.message),
+    onSuccess: () => {
+      invalidateFestival()
+      success('Deduplication started')
+    },
+    onError: (err: Error) => {
+      setActionError(err.message)
+      toastError('Deduplication failed')
+    },
   })
 
   const researchMutation = useMutation({
     mutationFn: () => researchFestival(id),
-    onSuccess: invalidateFestival,
-    onError: (error: Error) => setActionError(error.message),
+    onSuccess: () => {
+      invalidateFestival()
+      success('Research started')
+    },
+    onError: (err: Error) => {
+      setActionError(err.message)
+      toastError('Research failed')
+    },
   })
 
   const syncMutation = useMutation({
     mutationFn: () => syncFestival(id),
-    onSuccess: invalidateFestival,
-    onError: (error: Error) => setActionError(error.message),
+    onSuccess: () => {
+      invalidateFestival()
+      success('Sync started')
+    },
+    onError: (err: Error) => {
+      setActionError(err.message)
+      toastError('Sync failed')
+    },
   })
 
   const skipMutation = useMutation({
     mutationFn: (reason: string) => skipFestival(id, reason),
-    onSuccess: invalidateFestival,
-    onError: (error: Error) => setActionError(error.message),
+    onSuccess: () => {
+      invalidateFestival()
+      success('Festival skipped')
+    },
+    onError: (err: Error) => {
+      setActionError(err.message)
+      toastError('Skip failed')
+    },
   })
 
   const retryMutation = useMutation({
     mutationFn: () => retryFestival(id),
-    onSuccess: invalidateFestival,
-    onError: (error: Error) => setActionError(error.message),
+    onSuccess: () => {
+      invalidateFestival()
+      success('Retry started')
+    },
+    onError: (err: Error) => {
+      setActionError(err.message)
+      toastError('Retry failed')
+    },
   })
 
   const resetMutation = useMutation({
     mutationFn: (targetState: FestivalState) => resetFestival(id, targetState),
-    onSuccess: invalidateFestival,
-    onError: (error: Error) => setActionError(error.message),
+    onSuccess: () => {
+      invalidateFestival()
+      success('Festival reset')
+    },
+    onError: (err: Error) => {
+      setActionError(err.message)
+      toastError('Reset failed')
+    },
   })
 
   const forceSyncMutation = useMutation({
     mutationFn: () => forceSyncFestival(id),
-    onSuccess: invalidateFestival,
-    onError: (error: Error) => setActionError(error.message),
+    onSuccess: () => {
+      invalidateFestival()
+      success('Force sync started')
+    },
+    onError: (err: Error) => {
+      setActionError(err.message)
+      toastError('Force sync failed')
+    },
   })
 
   if (isLoading) {
