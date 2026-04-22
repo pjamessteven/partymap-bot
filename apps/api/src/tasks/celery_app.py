@@ -6,12 +6,17 @@ from src.config import get_settings
 
 settings = get_settings()
 
+# Use separate Redis DBs for broker and backend to avoid key collisions
+# Broker (queue): DB 0, Backend (results): DB 1
+_broker_url = settings.redis_url.rstrip("/")
+_backend_url = _broker_url.replace("/0", "/1") if "/0" in _broker_url else f"{_broker_url}/1"
+
 # Create Celery app
 celery_app = Celery(
     "partymap_bot",
-    broker=settings.redis_url,
-    backend=settings.redis_url,
-    include=["src.tasks.pipeline", "src.tasks.goabase_sync", "src.tasks.maintenance", "src.tasks.refresh_pipeline"],
+    broker=_broker_url,
+    backend=_backend_url,
+    include=["src.tasks.pipeline", "src.tasks.maintenance", "src.tasks.refresh_pipeline"],
 )
 
 # Configure Celery
@@ -30,7 +35,6 @@ celery_app.conf.update(
         "src.tasks.pipeline.deduplication_check": {"queue": "dedup"},
         "src.tasks.pipeline.research_pipeline": {"queue": "research"},
         "src.tasks.pipeline.sync_pipeline": {"queue": "sync"},
-        "src.tasks.goabase_sync.goabase_sync_pipeline": {"queue": "celery"},
         "src.tasks.maintenance.cleanup_failed": {"queue": "celery"},
         "src.tasks.refresh_pipeline.refresh_unconfirmed_dates_task": {"queue": "refresh"},
         "src.tasks.refresh_pipeline.refresh_festival_date_task": {"queue": "refresh"},
@@ -43,7 +47,6 @@ celery_app.conf.update(
 )
 
 # Import tasks to register them
-from src.tasks.goabase_sync import goabase_sync_pipeline
 from src.tasks.pipeline import (
     deduplication_check,
     discovery_pipeline,
@@ -64,5 +67,4 @@ __all__ = [
     "deduplication_check",
     "research_pipeline",
     "sync_pipeline",
-    "goabase_sync_pipeline",
 ]

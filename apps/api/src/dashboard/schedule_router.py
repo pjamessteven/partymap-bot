@@ -12,9 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
 from src.core.models import PipelineSchedule
-from src.tasks.goabase_sync import goabase_sync_pipeline
-from src.tasks.maintenance import cleanup_failed
-from src.tasks.pipeline import discovery_pipeline
 from src.utils.utc_now import utc_now
 
 logger = logging.getLogger(__name__)
@@ -24,12 +21,18 @@ router = APIRouter(prefix="/schedule", tags=["schedule"])
 # Valid task types
 VALID_TASK_TYPES = {"discovery", "goabase_sync", "cleanup_failed"}
 
-# Task mapping for manual runs
-TASK_MAP = {
-    "discovery": discovery_pipeline,
-    "goabase_sync": goabase_sync_pipeline,
-    "cleanup_failed": cleanup_failed,
-}
+
+def _get_task_map():
+    """Lazy-load task functions to avoid circular imports."""
+    from src.tasks.goabase_tasks import goabase_sync_task
+    from src.tasks.maintenance import cleanup_failed
+    from src.tasks.pipeline import discovery_pipeline
+
+    return {
+        "discovery": discovery_pipeline,
+        "goabase_sync": goabase_sync_task,
+        "cleanup_failed": cleanup_failed,
+    }
 
 
 class ScheduleConfig(BaseModel):
@@ -386,7 +389,7 @@ async def run_task_now(task_type: str):
         raise HTTPException(status_code=400, detail=f"Invalid task type: {task_type}")
 
     try:
-        task = TASK_MAP.get(task_type)
+        task = _get_task_map().get(task_type)
         if not task:
             raise HTTPException(status_code=500, detail=f"Task not configured: {task_type}")
 

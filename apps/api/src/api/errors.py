@@ -3,7 +3,7 @@
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -108,7 +108,7 @@ async def retry_quarantined_festival(
 
 @router.post("/quarantined/bulk-retry")
 async def bulk_retry_quarantined(
-    festival_ids: List[str],
+    festival_ids: List[str] = Body(..., description="List of festival IDs to retry"),
     force: bool = False,
     db: AsyncSession = Depends(get_db),
 ):

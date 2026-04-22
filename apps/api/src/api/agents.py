@@ -345,18 +345,18 @@ async def stream_run(
 ):
     """
     LangGraph-compatible SSE streaming endpoint.
-    
+
     Streams agent events in real-time using Server-Sent Events (SSE).
     Compatible with LangGraph's useStream hook and AI Elements.
-    
+
     Args:
         thread_id: The thread ID to stream
         stream_mode: Comma-separated list of stream modes (messages,updates,values,events,debug)
-    
+
     Returns:
         text/event-stream with LangGraph-formatted events
     """
-    # Check if thread exists
+    # Load all DB data upfront and close the session before streaming
     result = await db.execute(
         select(AgentThread).where(AgentThread.thread_id == thread_id)
     )
@@ -365,6 +365,29 @@ async def stream_run(
     if not thread:
         raise HTTPException(404, "Thread not found")
 
+    # Eagerly load historical events so we can release the DB connection
+    events_result = await db.execute(
+        select(AgentStreamEvent)
+        .where(AgentStreamEvent.thread_id == thread_id)
+        .order_by(AgentStreamEvent.timestamp)
+    )
+    historical_events = events_result.scalars().all()
+    # Serialize events to plain dicts while session is still open
+    serialized_events = [
+        {
+            "event_type": e.event_type,
+            "event_data": e.event_data,
+            "timestamp": e.timestamp,
+            "node_name": e.node_name,
+            "tool_name": e.tool_name,
+            "tool_call_id": e.tool_call_id,
+            "run_id": e.run_id,
+        }
+        for e in historical_events
+    ]
+    thread_status = thread.status
+    # Session will be closed automatically when endpoint returns
+
     async def event_stream() -> AsyncGenerator[str, None]:
         """Generate SSE events from stored events and live updates."""
 
@@ -372,21 +395,18 @@ async def stream_run(
         modes = set(stream_mode.split(","))
 
         # Send initial connection event
-        yield f"event: metadata\ndata: {json.dumps({'thread_id': thread_id, 'status': thread.status})}\n\n"
-
-        # Get historical events for replay
-        events_result = await db.execute(
-            select(AgentStreamEvent)
-            .where(AgentStreamEvent.thread_id == thread_id)
-            .order_by(AgentStreamEvent.timestamp)
-        )
-        historical_events = events_result.scalars().all()
+        yield f"event: metadata\ndata: {json.dumps({'thread_id': thread_id, 'status': thread_status})}\n\n"
 
         # Replay historical events in LangGraph format
-        for event in historical_events:
-            langgraph_events = _convert_to_langgraph_event(event, modes)
+        for event in serialized_events:
+            # Reconstruct a minimal event-like object for the converter
+            class _EventProxy:
+                pass
+            proxy = _EventProxy()
+            for k, v in event.items():
+                setattr(proxy, k, v)
+            langgraph_events = _convert_to_langgraph_event(proxy, modes)
             if langgraph_events:
-                # messages events may produce multiple SSE events (one per buffered chunk)
                 if isinstance(langgraph_events, list):
                     for lg_event in langgraph_events:
                         yield f"event: {lg_event['event']}\ndata: {json.dumps(lg_event['data'])}\n\n"
@@ -394,33 +414,28 @@ async def stream_run(
                     yield f"event: {langgraph_events['event']}\ndata: {json.dumps(langgraph_events['data'])}\n\n"
 
         # If thread is still running, subscribe to live updates
-        if thread.status == "running":
+        if thread_status == "running":
             broadcaster = await get_broadcaster()
             event_queue = asyncio.Queue()
 
             def on_live_event(data: dict):
-                # Use asyncio.create_task to safely add to queue from sync callback
                 try:
                     asyncio.get_event_loop().create_task(event_queue.put(data))
                 except RuntimeError:
                     pass
 
-            # Subscribe to live updates
             await broadcaster.subscribe(thread_id, on_live_event)
 
             try:
                 while True:
-                    # Wait for live events with timeout
                     try:
                         live_data = await asyncio.wait_for(event_queue.get(), timeout=30.0)
 
-                        # Convert live event to LangGraph format
                         if "event" in live_data:
                             langgraph_event = _convert_live_event_to_langgraph(live_data, modes)
                             if langgraph_event:
                                 yield f"event: {langgraph_event['event']}\ndata: {json.dumps(langgraph_event['data'])}\n\n"
 
-                        # Check if thread completed
                         if live_data.get("type") == "stream_complete":
                             yield f"event: end\ndata: {json.dumps({'status': 'success'})}\n\n"
                             break
@@ -429,14 +444,12 @@ async def stream_run(
                             break
 
                     except asyncio.TimeoutError:
-                        # Send keepalive
                         yield f"event: ping\ndata: {json.dumps({'timestamp': utc_now().isoformat()})}\n\n"
 
             finally:
                 await broadcaster.unsubscribe(thread_id, on_live_event)
         else:
-            # Thread already completed, send end event
-            yield f"event: end\ndata: {json.dumps({'status': thread.status})}\n\n"
+            yield f"event: end\ndata: {json.dumps({'status': thread_status})}\n\n"
 
     return StreamingResponse(
         event_stream(),
@@ -444,7 +457,7 @@ async def stream_run(
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # Disable Nginx buffering
+            "X-Accel-Buffering": "no",
         },
     )
 

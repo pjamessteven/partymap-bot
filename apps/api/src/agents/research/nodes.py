@@ -163,8 +163,15 @@ Iteration: {state.iteration + 1}/{state.max_iterations}
 Based on what's missing and the current state, what should be the next action?
 """
 
+    # Select system prompt based on workflow type
+    system_prompt = (
+        PLANNER_SYSTEM_PROMPT_UPDATE
+        if state.workflow_type == "update"
+        else PLANNER_SYSTEM_PROMPT_NEW
+    )
+
     messages = [
-        SystemMessage(content=PLANNER_SYSTEM_PROMPT),
+        SystemMessage(content=system_prompt),
         *state.messages,
         HumanMessage(content=prompt),
     ]

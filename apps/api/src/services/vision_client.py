@@ -38,6 +38,9 @@ class VisionClient:
         else:
             self.client = AsyncOpenAI(api_key=settings.openai_api_key)
 
+        # Reuse HTTP client for image downloads (don't create one per image)
+        self._http_client = httpx.AsyncClient(timeout=30.0, follow_redirects=True)
+
         self.model = "gpt-4o-mini"  # Vision-capable, cost-effective
         logger.info(f"VisionClient initialized with model: {self.model}")
 
@@ -173,22 +176,22 @@ class VisionClient:
             Base64 encoded image data or None if failed
         """
         try:
-            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-                response = await client.get(image_url)
-                response.raise_for_status()
+            # Use shared HTTP client (don't create new one per image)
+            response = await self._http_client.get(image_url)
+            response.raise_for_status()
 
-                # Check content type
-                content_type = response.headers.get("content-type", "")
-                if not content_type.startswith("image/"):
-                    logger.warning(f"URL is not an image: {content_type}")
-                    return None
+            # Check content type
+            content_type = response.headers.get("content-type", "")
+            if not content_type.startswith("image/"):
+                logger.warning(f"URL is not an image: {content_type}")
+                return None
 
-                # Convert to base64
-                image_bytes = response.content
-                image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+            # Convert to base64
+            image_bytes = response.content
+            image_base64 = base64.b64encode(image_bytes).decode('utf-8')
 
-                logger.debug(f"Downloaded image: {len(image_bytes)} bytes")
-                return image_base64
+            logger.debug(f"Downloaded image: {len(image_bytes)} bytes")
+            return image_base64
 
         except Exception as e:
             logger.error(f"Failed to download image: {e}")
@@ -197,3 +200,4 @@ class VisionClient:
     async def close(self):
         """Cleanup resources."""
         await self.client.close()
+        await self._http_client.aclose()

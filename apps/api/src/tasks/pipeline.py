@@ -1,17 +1,14 @@
 """Celery tasks for festival discovery pipeline."""
 
 import logging
-from datetime import timedelta
 from uuid import UUID
 
-from celery import Celery
 from sqlalchemy import func, select
 
 from src.agents.discovery import DiscoveryAgent
 from src.config import get_settings
 from src.core.database import SessionLocal
 from src.core.models import (
-    AgentDecision,
     CostLog,
     Festival,
     FestivalEventDate,
@@ -21,35 +18,12 @@ from src.core.models import (
 from src.core.schemas import ResearchFailure, ResearchResult
 from src.dashboard.settings_router import is_setting_enabled_sync
 from src.partymap.client import PartyMapClient
+from src.tasks.celery_app import celery_app
 from src.utils.utc_now import utc_now
 
 logger = logging.getLogger(__name__)
 
-# Create Celery app
 settings = get_settings()
-celery_app = Celery(
-    "partymap_bot",
-    broker=settings.redis_url,
-    backend=settings.redis_url,
-)
-
-celery_app.conf.update(
-    task_serializer="json",
-    accept_content=["json"],
-    result_serializer="json",
-    timezone="UTC",
-    enable_utc=True,
-    task_track_started=True,
-    task_time_limit=3600,
-    worker_prefetch_multiplier=1,
-)
-
-# Task routes
-celery_app.conf.task_routes = {
-    "src.tasks.pipeline.discovery_pipeline": {"queue": "discovery"},
-    "src.tasks.pipeline.research_pipeline": {"queue": "research"},
-    "src.tasks.pipeline.sync_pipeline": {"queue": "sync"},
-}
 
 
 def _log_state_transition(

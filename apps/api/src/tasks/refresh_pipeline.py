@@ -325,7 +325,7 @@ def apply_approved_refresh_task(approval_id: str):
 
                 # Apply event_date changes
                 if approval.proposed_changes.get("event_date"):
-                    await client.update_event_date(
+                    await client.update_event_date_fields(
                         approval.event_date_id,
                         approval.proposed_changes["event_date"],
                         message="Date confirmed via refresh pipeline",

@@ -61,7 +61,7 @@ def mock_celery_tasks():
     with patch("src.tasks.celery_app.discovery_pipeline") as mock_d, \
          patch("src.tasks.celery_app.research_pipeline") as mock_r, \
          patch("src.tasks.celery_app.sync_pipeline") as mock_s, \
-         patch("src.tasks.goabase_sync.goabase_sync_pipeline") as mock_g, \
+         patch("src.tasks.goabase_tasks.goabase_sync_task") as mock_g, \
          patch("src.tasks.refresh_pipeline.refresh_unconfirmed_dates_task") as mock_refresh, \
          patch("src.tasks.refresh_pipeline.apply_approved_refresh_task") as mock_apply:
         

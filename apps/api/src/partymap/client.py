@@ -1,7 +1,7 @@
 """PartyMap API client with proper Event/EventDate handling."""
 
+import asyncio
 import logging
-from datetime import datetime
 from typing import List, Optional
 
 import httpx
@@ -13,6 +13,7 @@ from tenacity import (
 )
 
 from src.config import Settings
+from src.core.database import get_async_redis_client
 from src.core.schemas import (
     DuplicateCheckResult,
     EventDateData,
@@ -22,6 +23,9 @@ from src.services.circuit_breaker import circuit_breaker
 from src.utils.utc_now import utc_now
 
 logger = logging.getLogger(__name__)
+
+# Redis key for global rate limiting
+_PARTYMAP_RATE_LIMIT_KEY = "ratelimit:partymap:last_request"
 
 
 class PartyMapAPIError(Exception):
@@ -57,23 +61,44 @@ class PartyMapClient:
             },
             timeout=30.0,
         )
-        self._last_request_time: Optional[datetime] = None
 
     async def close(self):
         """Close HTTP client."""
         await self.client.aclose()
 
+    async def __aenter__(self):
+        """Async context manager entry."""
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit."""
+        await self.close()
+
     async def _rate_limit(self):
-        """Apply rate limiting between requests."""
-        import asyncio
+        """Apply global rate limiting between requests using Redis."""
+        min_interval = 0.5  # 500ms between requests = max 120 req/min
 
-        if self._last_request_time:
-            min_interval = 0.5
-            elapsed = (utc_now() - self._last_request_time).total_seconds()
-            if elapsed < min_interval:
-                await asyncio.sleep(min_interval - elapsed)
+        try:
+            redis = get_async_redis_client()
+            # Use Redis to enforce global rate limit across all instances
+            # Get current time and last request time atomically
+            now = utc_now().timestamp()
 
-        self._last_request_time = utc_now()
+            # Get the last request time from Redis
+            last_request = await redis.get(_PARTYMAP_RATE_LIMIT_KEY)
+            if last_request:
+                elapsed = now - float(last_request)
+                if elapsed < min_interval:
+                    sleep_time = min_interval - elapsed
+                    logger.debug(f"Global rate limiting PartyMap: sleeping {sleep_time:.3f}s")
+                    await asyncio.sleep(sleep_time)
+
+            # Update the last request time
+            await redis.set(_PARTYMAP_RATE_LIMIT_KEY, utc_now().timestamp())
+        except Exception as e:
+            # If Redis fails, fall back to simple delay to be safe
+            logger.warning(f"Redis rate limiting failed, using fallback: {e}")
+            await asyncio.sleep(min_interval)
 
     @circuit_breaker("partymap", failure_threshold=5, recovery_timeout=30.0)
     @retry(
@@ -886,7 +911,7 @@ class PartyMapClient:
         """
         return await self.get_event(event_id)
 
-    async def update_event_date(
+    async def update_event_date_fields(
         self,
         event_date_id: int,
         updates: dict,

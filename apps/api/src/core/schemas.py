@@ -34,12 +34,30 @@ class RRuleData(BaseModel):
 class FestivalState(str, Enum):
     """State machine for festivals."""
 
+    # Discovery phase
     DISCOVERED = "discovered"
+
+    # New workflow states (integrated deduplication)
+    NEEDS_RESEARCH_NEW = "needs_research_new"
+    NEEDS_RESEARCH_UPDATE = "needs_research_update"
+
+    # Research phase
     RESEARCHING = "researching"
     RESEARCHED = "researched"
     RESEARCHED_PARTIAL = "researched_partial"
+    UPDATE_IN_PROGRESS = "update_in_progress"
+    UPDATE_COMPLETE = "update_complete"
+
+    # Sync phase
     SYNCING = "syncing"
     SYNCED = "synced"
+
+    # Validation states
+    VALIDATING = "validating"
+    VALIDATION_FAILED = "validation_failed"
+    QUARANTINED = "quarantined"
+
+    # End states
     FAILED = "failed"
     SKIPPED = "skipped"
     NEEDS_REVIEW = "needs_review"
@@ -441,6 +459,7 @@ class SettingCategory(str, Enum):
     SCHEDULING = "scheduling"
     COST = "cost"
     GENERAL = "general"
+    GOABASE = "goabase"
 
 
 class SystemSettingResponse(BaseModel):

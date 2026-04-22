@@ -22,6 +22,9 @@ class BrowserService:
 
     async def start(self):
         """Initialize browser."""
+        if self.browser is not None:
+            logger.debug("Browser already started, skipping")
+            return
         self._playwright = await async_playwright().start()
         self.browser = await self._playwright.chromium.launch(
             headless=self.settings.browser_headless
@@ -33,17 +36,21 @@ class BrowserService:
         """Close browser."""
         if self.page:
             await self.page.close()
+            self.page = None
         if self.browser:
             await self.browser.close()
+            self.browser = None
         if self._playwright:
             await self._playwright.stop()
+            self._playwright = None
         logger.info("Browser service closed")
 
     async def navigate(self, url: str) -> None:
         """Navigate to a URL."""
         if not self.page:
             await self.start()
-        await self.page.goto(url, wait_until="networkidle")
+        timeout = self.settings.browser_timeout
+        await self.page.goto(url, wait_until="networkidle", timeout=timeout)
         logger.info(f"Navigated to {url}")
 
     async def get_page_content(self) -> str:

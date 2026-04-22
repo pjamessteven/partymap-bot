@@ -78,7 +78,7 @@ async def get_goabase_settings(
     Get all Goabase sync settings.
     """
     settings_keys = [
-        "goabase_sync_enabled",
+        "auto_goabase_sync_enabled",
         "goabase_sync_frequency",
         "goabase_sync_day",
         "goabase_sync_hour",
@@ -99,15 +99,15 @@ async def update_goabase_settings(
 ):
     """
     Update Goabase sync settings.
-    
+
     Valid settings:
-    - goabase_sync_enabled: bool
+    - auto_goabase_sync_enabled: bool
     - goabase_sync_frequency: "daily" | "weekly" | "monthly"
     - goabase_sync_day: "monday" | "tuesday" | ... | "sunday"
     - goabase_sync_hour: int (0-23)
     """
     valid_keys = {
-        "goabase_sync_enabled": "boolean",
+        "auto_goabase_sync_enabled": "boolean",
         "goabase_sync_frequency": "string",
         "goabase_sync_day": "string",
         "goabase_sync_hour": "integer",
@@ -150,8 +150,10 @@ async def update_goabase_settings(
                 )
 
     # Update settings
+    from src.core.schemas import SystemSettingUpdate
     for key, value in settings.items():
-        await update_setting(db, key, str(value).lower() if isinstance(value, bool) else str(value))
+        update = SystemSettingUpdate(value=value)
+        await update_setting(key=key, update=update, db=db)
 
     return {
         "status": "success",

@@ -172,18 +172,21 @@ export function GoabaseSyncPanel() {
             <h4 className="font-medium">Sync Settings</h4>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <label className="text-sm">Enabled</label>
+                <label className="text-sm">Auto Sync (Weekly)</label>
                 <Select
-                  value={settings.goabase_sync_enabled.toString()}
+                  value={settings.auto_goabase_sync_enabled.toString()}
                   onChange={(e) =>
                     updateSettingsMutation.mutate({
-                      goabase_sync_enabled: e.target.value === 'true',
+                      auto_goabase_sync_enabled: e.target.value === 'true',
                     })
                   }
                 >
-                  <option value="true">Yes</option>
-                  <option value="false">No</option>
+                  <option value="true">Enabled</option>
+                  <option value="false">Disabled</option>
                 </Select>
+                <p className="text-xs text-muted-foreground">
+                  Automatically sync once per week
+                </p>
               </div>
               <div className="space-y-2">
                 <label className="text-sm">Frequency</label>

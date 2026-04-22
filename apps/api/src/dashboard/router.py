@@ -8,6 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from src.config import get_settings
 from src.core.database import get_db
@@ -30,9 +31,25 @@ from src.core.schemas import (
 )
 from src.dashboard.schedule_router import router as schedule_router
 from src.dashboard.settings_router import router as settings_router
-from src.tasks.celery_app import discovery_pipeline, research_pipeline, sync_pipeline
-from src.tasks.goabase_sync import goabase_sync_pipeline
 from src.utils.utc_now import utc_now
+
+
+def _get_research_pipeline():
+    """Lazy import to avoid circular imports."""
+    from src.tasks.pipeline import research_pipeline
+    return research_pipeline
+
+
+def _get_sync_pipeline():
+    """Lazy import to avoid circular imports."""
+    from src.tasks.pipeline import sync_pipeline
+    return sync_pipeline
+
+
+def _get_discovery_pipeline():
+    """Lazy import to avoid circular imports."""
+    from src.tasks.pipeline import discovery_pipeline
+    return discovery_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -46,14 +63,12 @@ router.include_router(settings_router)
 @router.get("/stats")
 async def get_stats(db: AsyncSession = Depends(get_db)):
     """Get dashboard statistics."""
-    # Count by state and total festivals
-    state_counts = {}
-    total_festivals = 0
-    for state in FestivalState:
-        result = await db.execute(select(func.count()).where(Festival.state == state.value))
-        count = result.scalar()
-        state_counts[state.value] = count
-        total_festivals += count
+    # Count by state using single GROUP BY query
+    state_counts = {state.value: 0 for state in FestivalState}
+    result = await db.execute(select(Festival.state, func.count()).group_by(Festival.state))
+    for state, count in result.all():
+        state_counts[state] = count
+    total_festivals = sum(state_counts.values())
 
     # Today's cost
     today_start = utc_now().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -115,18 +130,22 @@ async def list_festivals(
     db: AsyncSession = Depends(get_db),
 ):
     """List festivals with filters."""
-    query = select(Festival)
-
+    # Build base query with filters
+    base_query = select(Festival)
     if state:
-        query = query.where(Festival.state == state)
+        base_query = base_query.where(Festival.state == state)
     if source:
-        query = query.where(Festival.source == source)
+        base_query = base_query.where(Festival.source == source)
     if search:
-        query = query.where(Festival.name.ilike(f"%{search}%"))
+        base_query = base_query.where(Festival.name.ilike(f"%{search}%"))
 
-    query = query.order_by(desc(Festival.created_at))
-    query = query.offset(offset).limit(limit)
+    # Get total count before applying pagination
+    count_query = select(func.count()).select_from(base_query.subquery())
+    total_result = await db.execute(count_query)
+    total = total_result.scalar() or 0
 
+    # Apply pagination and ordering
+    query = base_query.order_by(desc(Festival.created_at)).offset(offset).limit(limit)
     result = await db.execute(query)
     festivals = result.scalars().all()
 
@@ -146,7 +165,7 @@ async def list_festivals(
             }
             for f in festivals
         ],
-        "total": len(festivals),
+        "total": total,
         "limit": limit,
         "offset": offset,
     }
@@ -231,29 +250,28 @@ async def get_festival(
     db: AsyncSession = Depends(get_db),
 ):
     """Get full festival details."""
-    festival = await db.get(Festival, festival_id)
+    # Use joined/subquery loading for related entities to avoid N+1 queries
+    festival_result = await db.execute(
+        select(Festival)
+        .options(
+            selectinload(Festival.event_dates),
+            selectinload(Festival.agent_decisions),
+        )
+        .where(Festival.id == festival_id)
+    )
+    festival = festival_result.scalar_one_or_none()
     if not festival:
         raise HTTPException(status_code=404, detail="Festival not found")
 
-    # Get event dates
-    dates_result = await db.execute(
-        select(FestivalEventDate).where(FestivalEventDate.festival_id == festival_id)
-    )
-    event_dates = dates_result.scalars().all()
-
-    # Get decisions
-    decisions_result = await db.execute(
-        select(AgentDecision)
-        .where(AgentDecision.festival_id == festival_id)
-        .order_by(AgentDecision.step_number)
-    )
-    decisions = decisions_result.scalars().all()
-
-    # Get cost
+    # Get cost (this is a separate aggregate query, not N+1)
     cost_result = await db.execute(
         select(func.sum(CostLog.cost_cents)).where(CostLog.festival_id == festival_id)
     )
     total_cost = cost_result.scalar() or 0
+
+    # Access related data from loaded relationships
+    event_dates = festival.event_dates
+    decisions = sorted(festival.agent_decisions, key=lambda d: d.step_number or 0)
 
     return {
         "id": str(festival.id),
@@ -326,7 +344,7 @@ async def retry_festival(
     await db.commit()
 
     # Queue for research
-    research_pipeline.delay(str(festival_id))
+    _get_research_pipeline().delay(str(festival_id))
 
     return {"message": "Festival queued for retry", "festival_id": str(festival_id)}
 
@@ -381,15 +399,8 @@ async def run_discovery(
     query: Optional[str] = None,
 ):
     """Manually trigger discovery."""
-    task = discovery_pipeline.delay(manual_query=query)
+    task = _get_discovery_pipeline().delay(manual_query=query)
     return {"message": "Discovery started", "task_id": task.id, "query": query}
-
-
-@router.post("/goabase/sync")
-async def run_goabase_sync():
-    """Manually trigger Goabase sync."""
-    task = goabase_sync_pipeline.delay()
-    return {"message": "Goabase sync started", "task_id": task.id}
 
 
 @router.get("/queries")
@@ -574,6 +585,29 @@ async def delete_query(
     return {"message": "Query deleted", "id": str(query_id)}
 
 
+@router.delete("/queries")
+async def delete_all_queries(
+    confirm: bool = Query(False, description="Must be true to delete all queries"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete all discovery queries."""
+    if not confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="Set confirm=true to delete all queries"
+        )
+
+    result = await db.execute(select(DiscoveryQuery))
+    queries = result.scalars().all()
+    count = len(queries)
+
+    for q in queries:
+        await db.delete(q)
+
+    await db.commit()
+    return {"message": f"Deleted {count} queries", "count": count}
+
+
 # ==================== Manual Festival Action Endpoints ====================
 
 from src.core.schemas import DeduplicationResultResponse
@@ -606,32 +640,24 @@ async def deduplicate_festival(
             detail=f"Festival must be in DISCOVERED state, currently: {festival.state}",
         )
 
-    # Run deduplication synchronously for immediate result
-    import asyncio
-
-    from sqlalchemy.orm import Session
-
+    # Run deduplication for immediate result
     from src.config import get_settings
-    from src.core.database import sync_engine
     from src.partymap.client import PartyMapClient
 
     settings = get_settings()
-    sync_session = Session(bind=sync_engine)
 
     try:
         # Check for duplicates
-        async def _check_duplicate():
-            client = PartyMapClient(settings)
+        client = PartyMapClient(settings)
+        try:
             location = (
                 festival.discovered_data.get("location", "") if festival.discovered_data else ""
             )
             result = await client.check_duplicate(
                 name=festival.name, source_url=festival.source_url, location=location
             )
+        finally:
             await client.close()
-            return result
-
-        result = asyncio.run(_check_duplicate())
 
         # Update festival with deduplication results
         festival.is_duplicate = result.is_duplicate
@@ -757,7 +783,7 @@ async def research_festival(
     await db.commit()
 
     # Queue research task
-    task = research_pipeline.delay(str(festival_id))
+    task = _get_research_pipeline().delay(str(festival_id))
 
     return FestivalActionResponse(
         festival_id=festival_id,
@@ -871,7 +897,7 @@ async def bulk_research_festivals(
             db.add(transition)
 
             # Queue research task
-            task = research_pipeline.delay(str(festival.id))
+            task = _get_research_pipeline().delay(str(festival.id))
             task_ids.append(task.id)
             queued += 1
 
@@ -973,7 +999,7 @@ async def sync_festival(
     await db.commit()
 
     # Queue sync task
-    task = sync_pipeline.delay(str(festival_id))
+    task = _get_sync_pipeline().delay(str(festival_id))
 
     return FestivalActionResponse(
         festival_id=festival_id,

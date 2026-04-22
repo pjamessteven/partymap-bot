@@ -75,4 +75,4 @@ def retry_failed():
             logger.info(f"Queued {retried} failed festivals for retry")
             return {"retried": retried}
 
-    return asyncio.run(_cleanup())
+    return asyncio.run(_retry())

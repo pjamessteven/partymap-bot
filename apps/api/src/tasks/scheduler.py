@@ -23,7 +23,7 @@ class DatabaseScheduler(Scheduler):
     # Task mapping: task_type -> full task path
     TASK_MAP = {
         "discovery": "src.tasks.pipeline.discovery_pipeline",
-        "goabase_sync": "src.tasks.goabase_sync.goabase_sync_pipeline",
+        "goabase_sync": "src.tasks.goabase_tasks.goabase_sync_task",
         "cleanup_failed": "src.tasks.maintenance.cleanup_failed",
         "refresh": "src.tasks.refresh_pipeline.refresh_unconfirmed_dates_task",
     }

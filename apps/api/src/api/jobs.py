@@ -3,7 +3,7 @@
 import json
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,7 +13,7 @@ from src.core.job_activity import JobActivityLogger
 from src.core.job_tracker import JobTracker, JobType
 from src.core.models import PipelineSchedule
 from src.tasks.celery_app import discovery_pipeline, research_pipeline, sync_pipeline
-from src.tasks.goabase_sync import goabase_sync_pipeline
+from src.tasks.goabase_tasks import goabase_sync_task
 from src.utils.utc_now import utc_now
 
 router = APIRouter()
@@ -123,7 +123,8 @@ async def stop_discovery_job():
     if not JobTracker.is_running(JobType.DISCOVERY):
         raise HTTPException(status_code=400, detail="Discovery not running")
 
-    success = JobTracker.stop_job(JobType.DISCOVERY)
+    success = await JobTracker.stop_job(JobType.DISCOVERY)
+    await broadcast_job_update("discovery", JobTracker.get_status(JobType.DISCOVERY))
     return {"message": "Discovery stopped", "success": success}
 
 
@@ -133,7 +134,9 @@ async def start_goabase_job():
     if JobTracker.is_running(JobType.GOABASE_SYNC):
         raise HTTPException(status_code=400, detail="Goabase sync already running")
 
-    task = goabase_sync_pipeline.delay()
+    task = goabase_sync_task.delay()
+    await JobTracker.start_job(JobType.GOABASE_SYNC, task.id)
+    await broadcast_job_update("goabase_sync", JobTracker.get_status(JobType.GOABASE_SYNC))
     return {"message": "Goabase sync started", "task_id": task.id}
 
 
@@ -143,7 +146,8 @@ async def stop_goabase_job():
     if not JobTracker.is_running(JobType.GOABASE_SYNC):
         raise HTTPException(status_code=400, detail="Goabase sync not running")
 
-    success = JobTracker.stop_job(JobType.GOABASE_SYNC)
+    success = await JobTracker.stop_job(JobType.GOABASE_SYNC)
+    await broadcast_job_update("goabase_sync", JobTracker.get_status(JobType.GOABASE_SYNC))
     return {"message": "Goabase sync stopped", "success": success}
 
 
@@ -163,7 +167,8 @@ async def stop_research_job():
     if not JobTracker.is_running(JobType.RESEARCH):
         raise HTTPException(status_code=400, detail="Research not running")
 
-    success = JobTracker.stop_job(JobType.RESEARCH)
+    success = await JobTracker.stop_job(JobType.RESEARCH)
+    await broadcast_job_update("research", JobTracker.get_status(JobType.RESEARCH))
     return {"message": "Research stopped", "success": success}
 
 
@@ -183,13 +188,14 @@ async def stop_sync_job():
     if not JobTracker.is_running(JobType.SYNC):
         raise HTTPException(status_code=400, detail="Sync not running")
 
-    success = JobTracker.stop_job(JobType.SYNC)
+    success = await JobTracker.stop_job(JobType.SYNC)
+    await broadcast_job_update("sync", JobTracker.get_status(JobType.SYNC))
     return {"message": "Sync stopped", "success": success}
 
 
 @router.post("/jobs/bulk/start")
 async def start_jobs_bulk(
-    job_types: List[str],
+    job_types: List[str] = Body(..., description="List of job types to start"),
     db: AsyncSession = Depends(get_db),
 ):
     """Start multiple jobs."""
@@ -252,7 +258,7 @@ async def start_jobs_bulk(
 
 @router.post("/jobs/bulk/stop")
 async def stop_jobs_bulk(
-    job_types: List[str],
+    job_types: List[str] = Body(..., description="List of job types to stop"),
     db: AsyncSession = Depends(get_db),
 ):
     """Stop multiple running jobs."""
@@ -291,7 +297,7 @@ async def stop_jobs_bulk(
 
 @router.post("/jobs/bulk/clear")
 async def clear_jobs_bulk(
-    job_types: List[str],
+    job_types: List[str] = Body(..., description="List of job types to clear"),
     db: AsyncSession = Depends(get_db),
 ):
     """Clear status for selected jobs."""

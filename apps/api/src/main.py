@@ -1,5 +1,6 @@
 """Main FastAPI application with dashboard."""
 
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -30,6 +31,21 @@ async def lifespan(app: FastAPI):
         await conn.execute(text("SELECT 1"))
     yield
     # Shutdown
+    # Dispose database engine
+    await engine.dispose()
+
+    # Close Postgres checkpointer connection
+    from src.core.database import close_postgres_checkpointer
+    await close_postgres_checkpointer()
+
+    # Cancel any running background tasks
+    from src.api.agents import _running_tasks
+    if _running_tasks:
+        for task in list(_running_tasks):
+            if not task.done():
+                task.cancel()
+        # Give tasks a moment to clean up
+        await asyncio.sleep(0.5)
 
 
 def create_app() -> FastAPI:

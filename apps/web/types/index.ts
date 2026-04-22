@@ -36,7 +36,8 @@ export type SettingCategory =
   | 'pipeline' 
   | 'scheduling' 
   | 'cost' 
-  | 'general';
+  | 'general'
+  | 'goabase';
 
 export type SettingValueType = 
   | 'string' 
@@ -278,7 +279,7 @@ export interface GoabaseSyncStatus {
 }
 
 export interface GoabaseSettings {
-  goabase_sync_enabled: boolean;
+  auto_goabase_sync_enabled: boolean;
   goabase_sync_frequency: 'daily' | 'weekly' | 'monthly';
   goabase_sync_day: 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
   goabase_sync_hour: number;

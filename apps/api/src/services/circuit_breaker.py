@@ -17,6 +17,7 @@ Configuration:
 """
 
 import asyncio
+import binascii
 import logging
 import time
 from dataclasses import dataclass, field
@@ -56,11 +57,22 @@ class CircuitBreakerConfig:
     failure_window: float = 60.0         # Window for counting failures (seconds)
     success_threshold: int = 2           # Successes needed to close from half-open
 
-    # Exceptions that count as failures
+    # Exceptions that count as failures (service-level failures)
     expected_exceptions: tuple = field(default_factory=lambda: (Exception,))
 
-    # Exceptions that are always failures (don't count toward threshold)
-    ignored_exceptions: tuple = field(default_factory=tuple)
+    # Exceptions to ignore for circuit breaker (don't count as failures)
+    # These are typically data/parsing errors, not service failures
+    ignored_exceptions: tuple = field(
+        default_factory=lambda: (
+            ValueError,          # JSON parsing, validation errors
+            TypeError,           # Type mismatches
+            KeyError,            # Missing keys in data structures
+            AttributeError,      # Missing attributes
+            IndexError,          # Index out of range
+            UnicodeDecodeError,  # Encoding issues
+            binascii.Error,  # Base64 decoding errors
+        )
+    )
 
 
 @dataclass
