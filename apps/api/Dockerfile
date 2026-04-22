@@ -28,7 +28,30 @@ RUN pip install --no-cache-dir --upgrade pip \
 RUN playwright install chromium
 
 # =============================================================================
-# STAGE 2: Runtime
+# STAGE 2: Tester (runs unit tests, build fails if tests fail)
+# =============================================================================
+FROM builder AS tester
+
+WORKDIR /app
+
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install dev dependencies for testing
+RUN pip install --no-cache-dir -e ".[dev]"
+
+# Copy application code and tests
+COPY src/ ./src/
+COPY tests/ ./tests/
+COPY migrations/ ./migrations/
+COPY alembic.ini .
+COPY migrate.sh .
+
+# Run unit tests with coverage (SQLite in-memory, no external DB needed)
+# Build fails if tests fail or coverage < 80%
+RUN pytest tests/unit/ -v --tb=short --cov=src --cov-report=term-missing --cov-fail-under=80
+
+# =============================================================================
+# STAGE 3: Runtime
 # =============================================================================
 FROM python:3.12-slim AS runtime
 
@@ -58,20 +81,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libasound2 \
     && rm -rf /var/lib/apt/lists/*
 
+# Create non-root user early (needed for browser cache ownership)
+RUN useradd -m -u 1000 appuser
+
 # Copy virtual environment from builder
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Copy application code
-COPY src/ ./src/
-COPY scripts/ ./scripts/
-COPY tests/ ./tests/
-COPY migrations/ ./migrations/
-COPY alembic.ini .
-COPY migrate.sh .
+# Copy Playwright browsers from builder and fix ownership
+COPY --from=builder --chown=appuser:appuser /root/.cache/ms-playwright /home/appuser/.cache/ms-playwright
 
-# Create non-root user
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+# Copy application code
+COPY --chown=appuser:appuser src/ ./src/
+COPY --chown=appuser:appuser scripts/ ./scripts/
+COPY --chown=appuser:appuser tests/ ./tests/
+COPY --chown=appuser:appuser migrations/ ./migrations/
+COPY --chown=appuser:appuser alembic.ini .
+COPY --chown=appuser:appuser migrate.sh .
 
 # Copy and set up entrypoint script
 COPY --chown=appuser:appuser entrypoint.sh /app/entrypoint.sh

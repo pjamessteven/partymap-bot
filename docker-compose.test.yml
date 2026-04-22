@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  test-db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: partymap_test
+    ports:
+      - "5439:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test -d partymap_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  test-redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api-unit-test:
+    build:
+      context: ../apps/api
+      target: tester
+    environment:
+      # Use SQLite for unit tests (in-memory, no DB needed)
+      PYTHONPATH: /app/src
+    volumes:
+      - ../apps/api/tests:/app/tests:ro
+      - ../apps/api/src:/app/src:ro
+    command: pytest tests/unit/ -v --tb=short --cov=src --cov-report=term-missing
+
+  api-integration-test:
+    build:
+      context: ../apps/api
+      target: deps
+    environment:
+      DATABASE_URL: postgresql+asyncpg://test:test@test-db:5432/partymap_test
+      REDIS_URL: redis://test-redis:6379/0
+      OPENROUTER_API_KEY: test-key
+      EXA_API_KEY: test-key
+      PARTYMAP_API_KEY: test-key
+      PYTHONPATH: /app/src
+    volumes:
+      - ../apps/api/tests:/app/tests:ro
+      - ../apps/api/src:/app/src:ro
+      - ../apps/api/migrations:/app/migrations:ro
+      - ../apps/api/alembic.ini:/app/alembic.ini:ro
+    command: >
+      sh -c "alembic upgrade head && pytest tests/integration/ -v --tb=short"
+    depends_on:
+      test-db:
+        condition: service_healthy
+      test-redis:
+        condition: service_healthy
