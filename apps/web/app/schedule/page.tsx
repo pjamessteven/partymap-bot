@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { formatDate, formatRelativeTime } from '@/lib/utils'
 import { useState } from 'react'
@@ -257,7 +258,7 @@ export default function SchedulePage() {
                         className="w-20"
                         placeholder="Min"
                       />
-                      <select
+                      <Select
                         value={editValues.day_of_week}
                         onChange={(e) =>
                           setEditValues({
@@ -265,7 +266,7 @@ export default function SchedulePage() {
                             day_of_week: e.target.value,
                           })
                         }
-                        className="h-10 rounded-md border border-input bg-background px-3"
+                        className="h-10"
                       >
                         <option value="">Daily</option>
                         <option value="0">Monday</option>
@@ -275,7 +276,7 @@ export default function SchedulePage() {
                         <option value="4">Friday</option>
                         <option value="5">Saturday</option>
                         <option value="6">Sunday</option>
-                      </select>
+                      </Select>
                       <Button
                         size="sm"
                         onClick={() => saveEdit(schedule.task_type)}

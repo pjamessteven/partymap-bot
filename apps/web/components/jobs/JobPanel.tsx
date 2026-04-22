@@ -22,6 +22,7 @@ import type { JobStatusDetail } from '@/types'
 import { Loader2, Play, Square, RefreshCw, CheckCircle, XCircle, Clock } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/components/ui/toast-provider'
+import { useDocumentVisibility } from '@/lib/hooks/use-document-visibility'
 
 interface JobPanelProps {
   jobType: 'discovery' | 'research' | 'sync' | 'goabase'
@@ -58,9 +59,8 @@ export function JobPanel({ jobType, showStream }: JobPanelProps) {
       }
       success(`${jobType} job started`)
       await refetch()
-    } catch (err) {
-      console.error('Failed to start job:', err)
-      error(`Failed to start ${jobType} job`)
+    } catch {
+      // Error toast handled by API interceptor
     } finally {
       setIsStarting(false)
     }
@@ -87,9 +87,8 @@ export function JobPanel({ jobType, showStream }: JobPanelProps) {
       }
       success(`${jobType} job stopped`)
       await refetch()
-    } catch (err) {
-      console.error('Failed to stop job:', err)
-      error(`Failed to stop ${jobType} job`)
+    } catch {
+      // Error toast handled by API interceptor
     } finally {
       setIsStopping(false)
     }
@@ -298,13 +297,14 @@ function JobStatusPanel({ jobType, status }: JobStatusPanelProps) {
 
 // Hook for fetching job status
 function useJobStatus(jobType: string) {
+  const isVisible = useDocumentVisibility()
   const { data, refetch } = useQuery({
     queryKey: ['job-status', jobType],
     queryFn: async (): Promise<JobStatusDetail> => {
       const statuses = await getJobsStatus()
       return statuses[jobType] || { status: 'idle' }
     },
-    refetchInterval: 2000,
+    refetchInterval: isVisible ? 2000 : false,
   })
 
   return { data, refetch }

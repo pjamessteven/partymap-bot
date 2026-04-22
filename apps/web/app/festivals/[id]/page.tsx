@@ -15,8 +15,9 @@ import {
 } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { TagList } from '@/components/agents/TagBadge'
 import { Button } from '@/components/ui/button'
-import { getStateColor, getStateLabel, formatDate, formatCurrency } from '@/lib/utils'
+import { getStateColor, getStateLabel, formatDate, formatCurrency, getPartyMapUrl } from '@/lib/utils'
 import Link from 'next/link'
 import {
   ArrowLeft,
@@ -32,6 +33,8 @@ import {
 import type { FestivalState } from '@/types'
 import { AgentStreamViewer } from '@/components/AgentStreamViewer'
 import { useToast } from '@/components/ui/toast-provider'
+import { StateBadge } from '@/components/state-badge'
+import { ConfirmDialog, PromptDialog } from '@/components/ui/dialog-confirm'
 
 export default function FestivalDetailPage() {
   const params = useParams()
@@ -39,6 +42,11 @@ export default function FestivalDetailPage() {
   const queryClient = useQueryClient()
   const [actionError, setActionError] = useState<string | null>(null)
   const { success, error: toastError } = useToast()
+
+  // Dialog states
+  const [skipDialogOpen, setSkipDialogOpen] = useState(false)
+  const [resetDialogOpen, setResetDialogOpen] = useState(false)
+  const [forceSyncDialogOpen, setForceSyncDialogOpen] = useState(false)
 
   const { data: festival, isLoading } = useQuery({
     queryKey: ['festival', id],
@@ -57,10 +65,7 @@ export default function FestivalDetailPage() {
       invalidateFestival()
       success('Deduplication started')
     },
-    onError: (err: Error) => {
-      setActionError(err.message)
-      toastError('Deduplication failed')
-    },
+    onError: (err: Error) => setActionError(err.message),
   })
 
   const researchMutation = useMutation({
@@ -69,10 +74,7 @@ export default function FestivalDetailPage() {
       invalidateFestival()
       success('Research started')
     },
-    onError: (err: Error) => {
-      setActionError(err.message)
-      toastError('Research failed')
-    },
+    onError: (err: Error) => setActionError(err.message),
   })
 
   const syncMutation = useMutation({
@@ -81,10 +83,7 @@ export default function FestivalDetailPage() {
       invalidateFestival()
       success('Sync started')
     },
-    onError: (err: Error) => {
-      setActionError(err.message)
-      toastError('Sync failed')
-    },
+    onError: (err: Error) => setActionError(err.message),
   })
 
   const skipMutation = useMutation({
@@ -93,10 +92,7 @@ export default function FestivalDetailPage() {
       invalidateFestival()
       success('Festival skipped')
     },
-    onError: (err: Error) => {
-      setActionError(err.message)
-      toastError('Skip failed')
-    },
+    onError: (err: Error) => setActionError(err.message),
   })
 
   const retryMutation = useMutation({
@@ -105,10 +101,7 @@ export default function FestivalDetailPage() {
       invalidateFestival()
       success('Retry started')
     },
-    onError: (err: Error) => {
-      setActionError(err.message)
-      toastError('Retry failed')
-    },
+    onError: (err: Error) => setActionError(err.message),
   })
 
   const resetMutation = useMutation({
@@ -117,10 +110,7 @@ export default function FestivalDetailPage() {
       invalidateFestival()
       success('Festival reset')
     },
-    onError: (err: Error) => {
-      setActionError(err.message)
-      toastError('Reset failed')
-    },
+    onError: (err: Error) => setActionError(err.message),
   })
 
   const forceSyncMutation = useMutation({
@@ -129,10 +119,7 @@ export default function FestivalDetailPage() {
       invalidateFestival()
       success('Force sync started')
     },
-    onError: (err: Error) => {
-      setActionError(err.message)
-      toastError('Force sync failed')
-    },
+    onError: (err: Error) => setActionError(err.message),
   })
 
   if (isLoading) {
@@ -211,21 +198,14 @@ export default function FestivalDetailPage() {
       {
         label: 'Skip',
         icon: SkipForward,
-        onClick: () => {
-          const reason = window.prompt('Reason for skipping:')
-          if (reason) skipMutation.mutate(reason)
-        },
+        onClick: () => setSkipDialogOpen(true),
         loading: skipMutation.isPending,
         variant: 'outline' as const,
       },
       {
         label: 'Reset to Discovered',
         icon: AlertTriangle,
-        onClick: () => {
-          if (window.confirm('Reset to discovered state? This will clear research data.')) {
-            resetMutation.mutate('discovered')
-          }
-        },
+        onClick: () => setResetDialogOpen(true),
         loading: resetMutation.isPending,
         variant: 'outline' as const,
       }
@@ -235,11 +215,7 @@ export default function FestivalDetailPage() {
       actions.push({
         label: 'Force Re-sync',
         icon: Upload,
-        onClick: () => {
-          if (window.confirm('Force sync this festival?')) {
-            forceSyncMutation.mutate()
-          }
-        },
+        onClick: () => setForceSyncDialogOpen(true),
         loading: forceSyncMutation.isPending,
         variant: 'outline' as const,
       })
@@ -273,7 +249,11 @@ export default function FestivalDetailPage() {
                     {researchData.festival_data.url && <li>URL: <a href={researchData.festival_data.url} className="text-blue-600 hover:underline" target="_blank" rel="noopener noreferrer">{researchData.festival_data.url}</a></li>}
                     {researchData.festival_data.logo && <li>Logo URL provided</li>}
                     {researchData.festival_data.date_time && <li>Dates: {researchData.festival_data.date_time.start} to {researchData.festival_data.date_time.end}</li>}
-                    {researchData.festival_data.tags && <li>Tags: {researchData.festival_data.tags.join(', ')}</li>}
+                    {researchData.festival_data.tags && (
+                      <li className="list-none mt-2">
+                        <TagList tags={researchData.festival_data.tags} />
+                      </li>
+                    )}
                   </ul>
                 </div>
               )}
@@ -363,15 +343,10 @@ export default function FestivalDetailPage() {
             Back to Festivals
           </Button>
         </Link>
-        <Badge
-          variant="secondary"
-          className={`${getStateColor(festival.state)} text-white text-sm px-3 py-1`}
-        >
-          {getStateLabel(festival.state)}
-        </Badge>
+        <StateBadge state={festival.state} className="text-sm px-3 py-1" />
       </div>
 
-      <h1 className="text-3xl font-bold">{festival.name}</h1>
+      <h1 className="text-2xl sm:text-3xl font-bold break-words">{festival.name}</h1>
 
       {actionError && (
         <div className="rounded-lg border border-destructive bg-destructive/10 p-4 text-destructive">
@@ -412,21 +387,21 @@ export default function FestivalDetailPage() {
             <CardTitle>Basic Info</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-3 gap-4 text-sm">
-              <div className="text-muted-foreground">ID</div>
-              <div className="col-span-2 font-mono text-xs">{festival.id}</div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4 text-sm">
+              <div className="text-muted-foreground sm:text-right">ID</div>
+              <div className="sm:col-span-2 font-mono text-xs break-all">{festival.id}</div>
 
-              <div className="text-muted-foreground">Source</div>
-              <div className="col-span-2">{festival.source}</div>
+              <div className="text-muted-foreground sm:text-right">Source</div>
+              <div className="sm:col-span-2">{festival.source}</div>
 
-              <div className="text-muted-foreground">Retry Count</div>
-              <div className="col-span-2">{festival.retry_count}</div>
+              <div className="text-muted-foreground sm:text-right">Retry Count</div>
+              <div className="sm:col-span-2">{festival.retry_count}</div>
 
-              <div className="text-muted-foreground">Created</div>
-              <div className="col-span-2">{formatDate(festival.created_at)}</div>
+              <div className="text-muted-foreground sm:text-right">Created</div>
+              <div className="sm:col-span-2">{formatDate(festival.created_at)}</div>
 
-              <div className="text-muted-foreground">Updated</div>
-              <div className="col-span-2">{formatDate(festival.updated_at)}</div>
+              <div className="text-muted-foreground sm:text-right">Updated</div>
+              <div className="sm:col-span-2">{formatDate(festival.updated_at)}</div>
             </div>
 
             {festival.source_url && (
@@ -450,17 +425,33 @@ export default function FestivalDetailPage() {
           <CardContent className="space-y-4">
             {festival.partymap_event_id ? (
               <>
-                <div className="grid grid-cols-3 gap-4 text-sm">
-                  <div className="text-muted-foreground">Event ID</div>
-                  <div className="col-span-2 font-mono text-xs">
-                    {festival.partymap_event_id}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4 text-sm">
+                  <div className="text-muted-foreground sm:text-right">Event ID</div>
+                  <div className="sm:col-span-2 font-mono text-xs break-all">
+                    <a
+                      href={getPartyMapUrl(festival.partymap_event_id, festival.partymap_date_id) || undefined}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:underline inline-flex items-center gap-1"
+                    >
+                      {festival.partymap_event_id}
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
                   </div>
 
                   {festival.partymap_date_id && (
                     <>
-                      <div className="text-muted-foreground">Date ID</div>
-                      <div className="col-span-2 font-mono text-xs">
-                        {festival.partymap_date_id}
+                      <div className="text-muted-foreground sm:text-right">Date ID</div>
+                      <div className="sm:col-span-2 font-mono text-xs break-all">
+                        <a
+                          href={getPartyMapUrl(festival.partymap_event_id, festival.partymap_date_id) || undefined}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 hover:underline inline-flex items-center gap-1"
+                        >
+                          {festival.partymap_date_id}
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
                       </div>
                     </>
                   )}
@@ -559,6 +550,45 @@ export default function FestivalDetailPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Dialogs */}
+      <PromptDialog
+        open={skipDialogOpen}
+        title="Skip Festival"
+        description="Please provide a reason for skipping this festival."
+        placeholder="Reason for skipping..."
+        confirmLabel="Skip"
+        onConfirm={(reason) => {
+          skipMutation.mutate(reason)
+          setSkipDialogOpen(false)
+        }}
+        onCancel={() => setSkipDialogOpen(false)}
+      />
+
+      <ConfirmDialog
+        open={resetDialogOpen}
+        title="Reset Festival"
+        description="Reset to discovered state? This will clear research data."
+        confirmLabel="Reset"
+        variant="destructive"
+        onConfirm={() => {
+          resetMutation.mutate('discovered')
+          setResetDialogOpen(false)
+        }}
+        onCancel={() => setResetDialogOpen(false)}
+      />
+
+      <ConfirmDialog
+        open={forceSyncDialogOpen}
+        title="Force Re-sync"
+        description="Are you sure you want to force sync this festival?"
+        confirmLabel="Force Sync"
+        onConfirm={() => {
+          forceSyncMutation.mutate()
+          setForceSyncDialogOpen(false)
+        }}
+        onCancel={() => setForceSyncDialogOpen(false)}
+      />
     </div>
   )
 }

@@ -7,12 +7,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
-import { getStateColor, getStateLabel, getActionLabel, formatRelativeTime } from '@/lib/utils'
+import { getStateColor, getStateLabel, getActionLabel, formatRelativeTime, getPartyMapUrl } from '@/lib/utils'
 import Link from 'next/link'
-import { RefreshCw, Search, RotateCcw, Upload, ExternalLink } from 'lucide-react'
+import { RefreshCw, Search, RotateCcw, Upload, ExternalLink, Inbox } from 'lucide-react'
 import type { FestivalState, FestivalAction } from '@/types'
 import { useToast } from '@/components/ui/toast-provider'
 import { StateBadge } from '@/components/state-badge'
+import { EmptyState } from '@/components/empty-state'
 
 const states: FestivalState[] = [
   'discovered',
@@ -43,7 +44,6 @@ export default function PendingPage() {
       invalidateAll()
       success('Deduplication started')
     },
-    onError: () => error('Deduplication failed'),
   })
 
   const researchMutation = useMutation({
@@ -52,7 +52,6 @@ export default function PendingPage() {
       invalidateAll()
       success('Research started')
     },
-    onError: () => error('Research failed'),
   })
 
   const syncMutation = useMutation({
@@ -61,7 +60,6 @@ export default function PendingPage() {
       invalidateAll()
       success('Sync started')
     },
-    onError: () => error('Sync failed'),
   })
 
   const handleAction = (festivalId: string, action: FestivalAction) => {
@@ -133,9 +131,11 @@ export default function PendingPage() {
               Loading...
             </div>
           ) : pending?.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              No pending actions
-            </div>
+            <EmptyState
+              icon={Inbox}
+              title="No pending actions"
+              description="All caught up! New festivals requiring action will appear here."
+            />
           ) : (
             <div className="space-y-2">
               {pending?.map((item) => {
@@ -167,8 +167,20 @@ export default function PendingPage() {
                         </p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <Badge variant="outline">
+                    <div className="flex items-center gap-2 sm:gap-3">
+                      {item.partymap_event_id && (
+                        <a
+                          href={getPartyMapUrl(item.partymap_event_id) || undefined}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 hover:bg-green-200 dark:bg-green-900 dark:text-green-200"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <ExternalLink className="h-3 w-3" />
+                          PartyMap
+                        </a>
+                      )}
+                      <Badge variant="outline" className="hidden sm:inline-flex">
                         {getActionLabel(item.suggested_action)}
                       </Badge>
                       <Button

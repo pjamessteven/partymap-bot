@@ -1,66 +1,44 @@
-'use client'
-
-import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { getCosts } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Select } from '@/components/ui/select'
 import { formatCurrency, formatDate } from '@/lib/utils'
+import { EmptyState } from '@/components/empty-state'
+import { DollarSign } from 'lucide-react'
+import { CostsRangeSelector } from './components/costs-range-selector'
+import api from '@/lib/api'
+import type { CostLog } from '@/types'
 
-const timeRanges = [
-  { value: '1', label: 'Last 24 hours' },
-  { value: '7', label: 'Last 7 days' },
-  { value: '14', label: 'Last 14 days' },
-  { value: '30', label: 'Last 30 days' },
-]
+async function getCostsServer(days: number = 7): Promise<CostLog[]> {
+  const response = await api.get('/costs', { params: { days } })
+  return response.data
+}
 
-export default function CostsPage() {
-  const [days, setDays] = useState(7)
+export default async function CostsPage({
+  searchParams,
+}: {
+  searchParams: { days?: string }
+}) {
+  const days = parseInt(searchParams.days || '7')
+  const costs = await getCostsServer(days)
 
-  const { data: costs, isLoading } = useQuery({
-    queryKey: ['costs', days],
-    queryFn: () => getCosts(days),
-  })
+  const totalCost = costs.reduce((sum, cost) => sum + cost.cost_cents, 0)
 
-  const totalCost = costs?.reduce((sum, cost) => sum + cost.cost_cents, 0) ?? 0
-
-  const costsByAgent = costs?.reduce((acc, cost) => {
+  const costsByAgent = costs.reduce((acc, cost) => {
     if (!acc[cost.agent_type]) acc[cost.agent_type] = 0
     acc[cost.agent_type] += cost.cost_cents
     return acc
   }, {} as Record<string, number>)
 
-  const costsByOperation = costs?.reduce((acc, cost) => {
+  const costsByOperation = costs.reduce((acc, cost) => {
     if (!acc[cost.operation]) acc[cost.operation] = 0
     acc[cost.operation] += cost.cost_cents
     return acc
   }, {} as Record<string, number>)
 
-  if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <h1 className="text-3xl font-bold">Cost Tracking</h1>
-        <div className="text-center py-8">Loading...</div>
-      </div>
-    )
-  }
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">Cost Tracking</h1>
-        <Select
-          value={days.toString()}
-          onChange={(e) => setDays(parseInt(e.target.value))}
-          className="w-48"
-        >
-          {timeRanges.map((range) => (
-            <option key={range.value} value={range.value}>
-              {range.label}
-            </option>
-          ))}
-        </Select>
+        <CostsRangeSelector days={days} />
       </div>
 
       {/* Summary Cards */}
@@ -79,7 +57,7 @@ export default function CostsPage() {
             <CardTitle className="text-sm font-medium">Total Operations</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{costs?.length ?? 0}</div>
+            <div className="text-2xl font-bold">{costs.length}</div>
           </CardContent>
         </Card>
 
@@ -89,14 +67,14 @@ export default function CostsPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {formatCurrency(costs?.length ? totalCost / costs.length : 0)}
+              {formatCurrency(costs.length ? totalCost / costs.length : 0)}
             </div>
           </CardContent>
         </Card>
       </div>
 
       {/* Costs by Agent */}
-      {costsByAgent && Object.keys(costsByAgent).length > 0 && (
+      {Object.keys(costsByAgent).length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle>Costs by Agent</CardTitle>
@@ -114,7 +92,7 @@ export default function CostsPage() {
       )}
 
       {/* Costs by Operation */}
-      {costsByOperation && Object.keys(costsByOperation).length > 0 && (
+      {Object.keys(costsByOperation).length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle>Costs by Operation</CardTitle>
@@ -137,7 +115,7 @@ export default function CostsPage() {
           <CardTitle>Recent Operations</CardTitle>
         </CardHeader>
         <CardContent>
-          {costs && costs.length > 0 ? (
+          {costs.length > 0 ? (
             <div className="space-y-2">
               {costs.slice(0, 50).map((cost) => (
                 <div
@@ -165,9 +143,11 @@ export default function CostsPage() {
               ))}
             </div>
           ) : (
-            <p className="text-muted-foreground text-center py-4">
-              No cost data for this period
-            </p>
+            <EmptyState
+              icon={DollarSign}
+              title="No cost data"
+              description="Cost tracking data will appear here once operations begin."
+            />
           )}
         </CardContent>
       </Card>

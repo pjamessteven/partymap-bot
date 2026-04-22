@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import { formatRelativeTime, cn } from "@/lib/utils";
 import { useToast } from "@/components/ui/toast-provider";
+import { EmptyState } from "@/components/empty-state";
 
 export default function RefreshPage() {
   const queryClient = useQueryClient();
@@ -50,7 +51,6 @@ export default function RefreshPage() {
       setSelectedApproval(null);
       success("Approval accepted");
     },
-    onError: () => error("Failed to approve"),
   });
 
   const rejectMutation = useMutation({
@@ -61,7 +61,6 @@ export default function RefreshPage() {
       setSelectedApproval(null);
       success("Approval rejected");
     },
-    onError: () => error("Failed to reject"),
   });
 
   const triggerMutation = useMutation({
@@ -70,7 +69,6 @@ export default function RefreshPage() {
       setTimeout(() => refetch(), 2000);
       success("Refresh triggered");
     },
-    onError: () => error("Failed to trigger refresh"),
   });
 
   const getStatusBadge = (status: string) => {
@@ -134,9 +132,11 @@ export default function RefreshPage() {
         {isLoading ? (
           <div className="text-center py-8">Loading...</div>
         ) : data?.items.length === 0 ? (
-          <div className="text-center py-8 text-muted-foreground">
-            No refresh approvals found
-          </div>
+          <EmptyState
+            icon={RefreshCw}
+            title="No refresh approvals"
+            description="Refresh pipeline approvals will appear here when events need verification."
+          />
         ) : (
           data?.items.map((approval) => (
             <Card

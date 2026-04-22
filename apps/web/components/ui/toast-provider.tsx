@@ -5,10 +5,12 @@ import {
   useContext,
   useState,
   useCallback,
+  useEffect,
   type ReactNode,
 } from 'react'
 import { X, CheckCircle, AlertCircle, Info } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { subscribeToApiErrors } from '@/lib/api-error-events'
 
 export type ToastType = 'success' | 'error' | 'info'
 
@@ -91,6 +93,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     (message: string) => addToast(message, 'error'),
     [addToast]
   )
+
+  // Subscribe to API error events from non-React code
+  useEffect(() => {
+    return subscribeToApiErrors((message, type) => {
+      addToast(message, type)
+    })
+  }, [addToast])
 
   return (
     <ToastContext.Provider value={{ toast: addToast, success, error }}>

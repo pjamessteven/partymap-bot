@@ -48,9 +48,8 @@ export default function DashboardPage() {
       await runDiscovery()
       refetchStats()
       success('Discovery started successfully')
-    } catch (err) {
-      console.error('Failed to run discovery:', err)
-      error('Failed to start discovery')
+    } catch {
+      // Error toast handled by API interceptor
     } finally {
       setIsRunningDiscovery(false)
     }

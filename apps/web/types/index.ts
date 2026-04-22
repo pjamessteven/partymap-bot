@@ -98,6 +98,7 @@ export interface FestivalPendingAction {
   created_at: string;
   retry_count: number;
   last_error?: string;
+  partymap_event_id?: string | null;
 }
 
 export interface FestivalActionResponse {

@@ -14,7 +14,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
 import { Check, X, Plus, Trash2, Edit2, Save } from 'lucide-react'
+import { ConfirmDialog } from '@/components/ui/dialog-confirm'
 
 export default function QueriesPage() {
   const queryClient = useQueryClient()
@@ -22,6 +24,8 @@ export default function QueriesPage() {
   const [newCategory, setNewCategory] = useState('general')
   const [editing, setEditing] = useState<string | null>(null)
   const [editValues, setEditValues] = useState({ query_text: '', category: '' })
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [queryToDelete, setQueryToDelete] = useState<string | null>(null)
 
   const { data: queries, isLoading } = useQuery({
     queryKey: ['queries'],
@@ -107,16 +111,16 @@ export default function QueriesPage() {
               onChange={(e) => setNewQuery(e.target.value)}
               className="flex-1"
             />
-            <select
+            <Select
               value={newCategory}
               onChange={(e) => setNewCategory(e.target.value)}
-              className="h-10 rounded-md border border-input bg-background px-3"
+              className="h-10 w-40"
             >
               <option value="general">General</option>
               <option value="country">Country</option>
               <option value="city">City</option>
               <option value="genre">Genre</option>
-            </select>
+            </Select>
             <Button
               onClick={() => createMutation.mutate()}
               disabled={!newQuery.trim() || createMutation.isPending}
@@ -158,7 +162,7 @@ export default function QueriesPage() {
                               }
                               className="flex-1"
                             />
-                            <select
+                            <Select
                               value={editValues.category}
                               onChange={(e) =>
                                 setEditValues({
@@ -166,13 +170,13 @@ export default function QueriesPage() {
                                   category: e.target.value,
                                 })
                               }
-                              className="h-10 rounded-md border border-input bg-background px-3"
+                              className="h-10 w-40"
                             >
                               <option value="general">General</option>
                               <option value="country">Country</option>
                               <option value="city">City</option>
                               <option value="genre">Genre</option>
-                            </select>
+                            </Select>
                           </div>
                           <div className="flex gap-2 ml-2">
                             <Button
@@ -244,13 +248,8 @@ export default function QueriesPage() {
                               variant="ghost"
                               className="text-destructive"
                               onClick={() => {
-                                if (
-                                  window.confirm(
-                                    'Delete this query?'
-                                  )
-                                ) {
-                                  deleteMutation.mutate(query.id)
-                                }
+                                setQueryToDelete(query.id)
+                                setDeleteDialogOpen(true)
                               }}
                               disabled={deleteMutation.isPending}
                               aria-label="Delete query"
@@ -267,6 +266,23 @@ export default function QueriesPage() {
             </Card>
           ))}
       </div>
+
+      <ConfirmDialog
+        open={deleteDialogOpen}
+        title="Delete Query"
+        description="Are you sure you want to delete this query? This action cannot be undone."
+        confirmLabel="Delete"
+        variant="destructive"
+        onConfirm={() => {
+          if (queryToDelete) deleteMutation.mutate(queryToDelete)
+          setDeleteDialogOpen(false)
+          setQueryToDelete(null)
+        }}
+        onCancel={() => {
+          setDeleteDialogOpen(false)
+          setQueryToDelete(null)
+        }}
+      />
     </div>
   )
 }

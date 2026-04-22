@@ -51,7 +51,6 @@ export default function SettingsPage() {
       setEditing(null)
       success('Setting updated')
     },
-    onError: () => error('Failed to update setting'),
   })
 
   const enableAutoMutation = useMutation({
@@ -61,7 +60,6 @@ export default function SettingsPage() {
       queryClient.invalidateQueries({ queryKey: ['settings'] })
       success('Auto-process enabled')
     },
-    onError: () => error('Failed to enable auto-process'),
   })
 
   const disableAutoMutation = useMutation({
@@ -71,7 +69,6 @@ export default function SettingsPage() {
       queryClient.invalidateQueries({ queryKey: ['settings'] })
       success('Auto-process disabled')
     },
-    onError: () => error('Failed to disable auto-process'),
   })
 
   const startEditing = (key: string, value: unknown) => {

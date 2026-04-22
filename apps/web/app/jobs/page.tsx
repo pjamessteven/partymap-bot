@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { getJobsStatus } from '@/lib/api'
 import type { JobStatus } from '@/types'
 import { Activity, Zap, Search, RefreshCw, Database } from 'lucide-react'
+import { useDocumentVisibility } from '@/lib/hooks/use-document-visibility'
 
 interface SimpleJobStatus {
   status: string
@@ -31,25 +32,25 @@ export default function JobsPage() {
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-1 flex-col">
         <TabsList className="grid w-full grid-cols-5">
-          <TabsTrigger value="overview" className="flex items-center gap-2">
-            <Activity className="h-4 w-4" />
-            Overview
+          <TabsTrigger value="overview" className="px-1 sm:px-3">
+            <Activity className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">Overview</span>
           </TabsTrigger>
-          <TabsTrigger value="discovery" className="flex items-center gap-2">
-            <Search className="h-4 w-4" />
-            Discovery
+          <TabsTrigger value="discovery" className="px-1 sm:px-3">
+            <Search className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">Discovery</span>
           </TabsTrigger>
-          <TabsTrigger value="research" className="flex items-center gap-2">
-            <Zap className="h-4 w-4" />
-            Research
+          <TabsTrigger value="research" className="px-1 sm:px-3">
+            <Zap className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">Research</span>
           </TabsTrigger>
-          <TabsTrigger value="sync" className="flex items-center gap-2">
-            <RefreshCw className="h-4 w-4" />
-            Sync
+          <TabsTrigger value="sync" className="px-1 sm:px-3">
+            <RefreshCw className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">Sync</span>
           </TabsTrigger>
-          <TabsTrigger value="goabase" className="flex items-center gap-2">
-            <Database className="h-4 w-4" />
-            Goabase
+          <TabsTrigger value="goabase" className="px-1 sm:px-3">
+            <Database className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">Goabase</span>
           </TabsTrigger>
         </TabsList>
 
@@ -83,10 +84,11 @@ export default function JobsPage() {
 }
 
 function JobOverview() {
+  const isVisible = useDocumentVisibility()
   const { data: allStatuses } = useQuery({
     queryKey: ['all-job-statuses'],
     queryFn: getJobsStatus,
-    refetchInterval: 2000,
+    refetchInterval: isVisible ? 2000 : false,
   })
 
   // Helper function to get status data for a job type
@@ -104,7 +106,7 @@ function JobOverview() {
   ]
 
   return (
-    <div className="grid h-full grid-cols-2 gap-4">
+    <div className="grid h-full grid-cols-1 md:grid-cols-2 gap-4">
       <Card>
         <CardHeader>
           <CardTitle>All Jobs Status</CardTitle>

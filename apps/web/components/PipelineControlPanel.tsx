@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Play, Square, RefreshCw, AlertCircle, CheckCircle } from 'lucide-react'
+import { useDocumentVisibility } from '@/lib/hooks/use-document-visibility'
 
 interface PipelineStatus {
   name: string
@@ -173,10 +174,11 @@ function PipelineCard({
 }
 
 export function PipelineControlPanel() {
+  const isVisible = useDocumentVisibility()
   const { data, isLoading } = useQuery({
     queryKey: ['pipelines'],
     queryFn: getAllPipelineStatuses,
-    refetchInterval: 2000, // Poll every 2 seconds
+    refetchInterval: isVisible ? 2000 : false,
   })
 
   if (isLoading) {

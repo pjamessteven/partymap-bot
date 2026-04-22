@@ -8,13 +8,14 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
-import { getStateColor, getStateLabel, formatRelativeTime } from '@/lib/utils'
+import { getStateColor, getStateLabel, formatRelativeTime, getPartyMapUrl } from '@/lib/utils'
 import Link from 'next/link'
-import { Search, RefreshCw, PlayCircle, ArrowUpDown } from 'lucide-react'
+import { Search, RefreshCw, PlayCircle, ArrowUpDown, Music, ExternalLink } from 'lucide-react'
 import type { FestivalState } from '@/types'
 import { ValidationBadge, RetryCountBadge } from '@/components/ValidationBadge'
 import { TagList, extractTagsFromResearchData } from '@/components/agents/TagBadge'
 import { StateBadge } from '@/components/state-badge'
+import { EmptyState } from '@/components/empty-state'
 
 const states: FestivalState[] = [
   'discovered',
@@ -152,7 +153,7 @@ export default function FestivalsPage() {
       {/* Filters */}
       <Card>
         <CardContent className="pt-6">
-          <form onSubmit={handleSearch} className="flex gap-4">
+          <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-3 sm:gap-4">
             <div className="flex-1">
               <Input
                 placeholder="Search festivals..."
@@ -161,25 +162,27 @@ export default function FestivalsPage() {
                 className="w-full"
               />
             </div>
-            <Select
-              value={state}
-              onChange={(e) => {
-                setState(e.target.value)
-                setOffset(0)
-              }}
-              className="w-48"
-            >
-              <option value="">All States</option>
-              {states.map((s) => (
-                <option key={s} value={s}>
-                  {getStateLabel(s)}
-                </option>
-              ))}
-            </Select>
-            <Button type="submit">
-              <Search className="h-4 w-4 mr-2" />
-              Search
-            </Button>
+            <div className="flex gap-3 sm:gap-4">
+              <Select
+                value={state}
+                onChange={(e) => {
+                  setState(e.target.value)
+                  setOffset(0)
+                }}
+                className="w-full sm:w-48"
+              >
+                <option value="">All States</option>
+                {states.map((s) => (
+                  <option key={s} value={s}>
+                    {getStateLabel(s)}
+                  </option>
+                ))}
+              </Select>
+              <Button type="submit" className="shrink-0">
+                <Search className="h-4 w-4 mr-2" />
+                Search
+              </Button>
+            </div>
           </form>
         </CardContent>
       </Card>
@@ -197,13 +200,15 @@ export default function FestivalsPage() {
               Loading...
             </div>
           ) : sortedFestivals?.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              No festivals found
-            </div>
+            <EmptyState
+              icon={Music}
+              title="No festivals found"
+              description="Try adjusting your search or filters, or run discovery to find new festivals."
+            />
           ) : (
             <div className="space-y-2">
-              {/* Header row with sort buttons */}
-              <div className="flex items-center justify-between px-4 py-2 text-sm text-muted-foreground border-b">
+              {/* Header row with sort buttons — hidden on mobile */}
+              <div className="hidden sm:flex items-center justify-between px-4 py-2 text-sm text-muted-foreground border-b">
                 <div className="flex-1">Festival</div>
                 <div className="flex items-center gap-4">
                   <button
@@ -230,24 +235,36 @@ export default function FestivalsPage() {
                   <Link
                     key={festival.id}
                     href={`/festivals/${festival.id}`}
-                    className="flex items-center justify-between rounded-lg border p-4 hover:bg-muted transition-colors"
+                    className="flex flex-col sm:flex-row sm:items-center sm:justify-between rounded-lg border p-3 sm:p-4 hover:bg-muted transition-colors gap-2 sm:gap-0"
                   >
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-start sm:items-center gap-3 sm:gap-4 min-w-0">
                       <div
-                        className={`w-3 h-3 rounded-full ${getStateColor(
+                        className={`w-3 h-3 rounded-full shrink-0 mt-1.5 sm:mt-0 ${getStateColor(
                           festival.state
                         )}`}
                       />
                       <div className="min-w-0">
-                        <p className="font-medium">{festival.name}</p>
-                        <p className="text-sm text-muted-foreground">
+                        <p className="font-medium text-sm sm:text-base">{festival.name}</p>
+                        <p className="text-xs sm:text-sm text-muted-foreground">
                           Source: {festival.source} •{' '}
                           {formatRelativeTime(festival.created_at)}
                         </p>
-                        <TagList tags={tags} className="mt-1.5" max={4} />
+                        <TagList tags={tags} className="mt-1.5" max={3} />
                       </div>
                     </div>
-                    <div className="flex items-center gap-3 shrink-0">
+                    <div className="flex items-center gap-2 sm:gap-3 shrink-0 ml-6 sm:ml-0">
+                      {festival.partymap_event_id && (
+                        <a
+                          href={getPartyMapUrl(festival.partymap_event_id, festival.partymap_date_id) || undefined}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 hover:bg-green-200 dark:bg-green-900 dark:text-green-200"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <ExternalLink className="h-3 w-3" />
+                          PartyMap
+                        </a>
+                      )}
                       {festival.validation_status && festival.validation_status !== 'pending' && (
                         <ValidationBadge status={festival.validation_status} showLabel={false} />
                       )}
@@ -256,7 +273,7 @@ export default function FestivalsPage() {
                       )}
                       <Badge
                         variant="secondary"
-                        className={`${getStateColor(festival.state)} text-white`}
+                        className={`${getStateColor(festival.state)} text-white text-xs sm:text-sm`}
                       >
                         {getStateLabel(festival.state)}
                       </Badge>

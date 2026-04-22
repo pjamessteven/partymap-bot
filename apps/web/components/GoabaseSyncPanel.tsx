@@ -13,18 +13,22 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
+import { Select } from '@/components/ui/select'
+import { Input } from '@/components/ui/input'
 import type { GoabaseSettings } from '@/types'
 import { Play, Square, RefreshCw, Settings2 } from 'lucide-react'
+import { useDocumentVisibility } from '@/lib/hooks/use-document-visibility'
 
 export function GoabaseSyncPanel() {
   const queryClient = useQueryClient()
   const [showSettings, setShowSettings] = useState(false)
 
   // Queries
+  const isVisible = useDocumentVisibility()
   const { data: syncStatus, isLoading: statusLoading } = useQuery({
     queryKey: ['goabase-status'],
     queryFn: getGoabaseSyncStatus,
-    refetchInterval: 2000,
+    refetchInterval: isVisible ? 2000 : false,
   })
 
   const { data: settings } = useQuery({
@@ -169,8 +173,7 @@ export function GoabaseSyncPanel() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <label className="text-sm">Enabled</label>
-                <select
-                  className="w-full border rounded px-2 py-1"
+                <Select
                   value={settings.goabase_sync_enabled.toString()}
                   onChange={(e) =>
                     updateSettingsMutation.mutate({
@@ -180,12 +183,11 @@ export function GoabaseSyncPanel() {
                 >
                   <option value="true">Yes</option>
                   <option value="false">No</option>
-                </select>
+                </Select>
               </div>
               <div className="space-y-2">
                 <label className="text-sm">Frequency</label>
-                <select
-                  className="w-full border rounded px-2 py-1"
+                <Select
                   value={settings.goabase_sync_frequency}
                   onChange={(e) =>
                     updateSettingsMutation.mutate({
@@ -196,12 +198,11 @@ export function GoabaseSyncPanel() {
                   <option value="daily">Daily</option>
                   <option value="weekly">Weekly</option>
                   <option value="monthly">Monthly</option>
-                </select>
+                </Select>
               </div>
               <div className="space-y-2">
                 <label className="text-sm">Day (if weekly)</label>
-                <select
-                  className="w-full border rounded px-2 py-1"
+                <Select
                   value={settings.goabase_sync_day}
                   onChange={(e) =>
                     updateSettingsMutation.mutate({
@@ -216,15 +217,14 @@ export function GoabaseSyncPanel() {
                   <option value="friday">Friday</option>
                   <option value="saturday">Saturday</option>
                   <option value="sunday">Sunday</option>
-                </select>
+                </Select>
               </div>
               <div className="space-y-2">
                 <label className="text-sm">Hour (0-23)</label>
-                <input
+                <Input
                   type="number"
                   min={0}
                   max={23}
-                  className="w-full border rounded px-2 py-1"
                   value={settings.goabase_sync_hour}
                   onChange={(e) =>
                     updateSettingsMutation.mutate({
