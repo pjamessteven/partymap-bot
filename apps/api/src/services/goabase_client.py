@@ -6,12 +6,6 @@ import re
 from typing import List, Optional
 
 import httpx
-from tenacity import (
-    retry,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_exponential,
-)
 
 from src.config import Settings
 from src.core.schemas import DiscoveredFestival, EventDateData, FestivalData

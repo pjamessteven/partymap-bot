@@ -1,26 +1,27 @@
 """API routes for agent streaming."""
 
-import json
-import uuid
 import asyncio
+import json
 import logging
-from typing import Optional, AsyncGenerator
-from datetime import datetime
-from src.utils.utc_now import utc_now
+import uuid
+from typing import AsyncGenerator, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
 from langchain_core.messages import message_to_dict
+from sqlalchemy import desc, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.utils.utc_now import utc_now
 
 logger = logging.getLogger(__name__)
 
 from src.agents.research.graph import get_research_graph
 from src.agents.research.state import ResearchState
 from src.agents.streaming import StreamPersistenceHandler, get_broadcaster
-from src.core.database import get_db
-from src.core.models import AgentThread, AgentStreamEvent, Festival
 from src.config import get_settings
+from src.core.database import get_db
+from src.core.models import AgentStreamEvent, AgentThread, Festival
 
 router = APIRouter()
 
@@ -90,13 +91,13 @@ async def _run_research_graph(
     settings = get_settings()
 
     # Initialize services
-    from src.services.browser_service import BrowserService
-    from src.services.llm_client import LLMClient
-    from src.services.exa_client import ExaClient
+    from src.agents.shared.playwright_toolkit import create_playwright_tools
     from src.partymap.client import PartyMapClient
+    from src.services.browser_service import BrowserService
+    from src.services.exa_client import ExaClient
+    from src.services.llm_client import LLMClient
     from src.services.musicbrainz_client import MusicBrainzClient
     from src.services.vision_client import VisionClient
-    from src.agents.shared.playwright_toolkit import create_playwright_tools
 
     browser = BrowserService(settings)
     llm = LLMClient(settings)
@@ -104,7 +105,7 @@ async def _run_research_graph(
     partymap = PartyMapClient(settings)
     musicbrainz = MusicBrainzClient(settings)
     vision = VisionClient(settings)  # GPT-4o-mini for image description
-    
+
     # Create Playwright tools from toolkit
     try:
         playwright_tools = await create_playwright_tools(
@@ -360,19 +361,19 @@ async def stream_run(
         select(AgentThread).where(AgentThread.thread_id == thread_id)
     )
     thread = result.scalar_one_or_none()
-    
+
     if not thread:
         raise HTTPException(404, "Thread not found")
 
     async def event_stream() -> AsyncGenerator[str, None]:
         """Generate SSE events from stored events and live updates."""
-        
+
         # Parse stream modes
         modes = set(stream_mode.split(","))
-        
+
         # Send initial connection event
         yield f"event: metadata\ndata: {json.dumps({'thread_id': thread_id, 'status': thread.status})}\n\n"
-        
+
         # Get historical events for replay
         events_result = await db.execute(
             select(AgentStreamEvent)
@@ -380,7 +381,7 @@ async def stream_run(
             .order_by(AgentStreamEvent.timestamp)
         )
         historical_events = events_result.scalars().all()
-        
+
         # Replay historical events in LangGraph format
         for event in historical_events:
             langgraph_events = _convert_to_langgraph_event(event, modes)
@@ -391,34 +392,34 @@ async def stream_run(
                         yield f"event: {lg_event['event']}\ndata: {json.dumps(lg_event['data'])}\n\n"
                 else:
                     yield f"event: {langgraph_events['event']}\ndata: {json.dumps(langgraph_events['data'])}\n\n"
-        
+
         # If thread is still running, subscribe to live updates
         if thread.status == "running":
             broadcaster = await get_broadcaster()
             event_queue = asyncio.Queue()
-            
+
             def on_live_event(data: dict):
                 # Use asyncio.create_task to safely add to queue from sync callback
                 try:
                     asyncio.get_event_loop().create_task(event_queue.put(data))
                 except RuntimeError:
                     pass
-            
+
             # Subscribe to live updates
             await broadcaster.subscribe(thread_id, on_live_event)
-            
+
             try:
                 while True:
                     # Wait for live events with timeout
                     try:
                         live_data = await asyncio.wait_for(event_queue.get(), timeout=30.0)
-                        
+
                         # Convert live event to LangGraph format
                         if "event" in live_data:
                             langgraph_event = _convert_live_event_to_langgraph(live_data, modes)
                             if langgraph_event:
                                 yield f"event: {langgraph_event['event']}\ndata: {json.dumps(langgraph_event['data'])}\n\n"
-                        
+
                         # Check if thread completed
                         if live_data.get("type") == "stream_complete":
                             yield f"event: end\ndata: {json.dumps({'status': 'success'})}\n\n"
@@ -426,11 +427,11 @@ async def stream_run(
                         elif live_data.get("type") == "stream_error":
                             yield f"event: error\ndata: {json.dumps({'error': live_data.get('error')})}\n\n"
                             break
-                            
+
                     except asyncio.TimeoutError:
                         # Send keepalive
                         yield f"event: ping\ndata: {json.dumps({'timestamp': utc_now().isoformat()})}\n\n"
-                        
+
             finally:
                 await broadcaster.unsubscribe(thread_id, on_live_event)
         else:

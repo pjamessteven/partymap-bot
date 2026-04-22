@@ -1,10 +1,10 @@
 """Research agent graph definition."""
 
-from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import END, START, StateGraph
 
+from src.agents.research.nodes import evaluator_node, planner_node, tools_node
 from src.agents.research.state import ResearchState
-from src.agents.research.nodes import planner_node, tools_node, evaluator_node
 
 
 def create_research_graph(checkpointer=None):

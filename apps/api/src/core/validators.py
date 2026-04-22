@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from urllib.parse import urlparse
 
 from src.core.schemas import FestivalData, ValidationResult
@@ -25,7 +25,7 @@ class PartyMapSyncValidator:
     - location: {description}
     - logo: {url}
     """
-    
+
     # PartyMap API requirements
     REQUIRED_FIELDS = ["name", "description", "full_description", "event_dates"]
     MIN_NAME_LENGTH = 2
@@ -33,12 +33,12 @@ class PartyMapSyncValidator:
     MIN_FULL_DESCRIPTION_LENGTH = 20
     MIN_LOCATION_LENGTH = 3
     MAX_TAGS = 5
-    
+
     def __init__(self):
         self.errors: List[Dict[str, Any]] = []
         self.warnings: List[Dict[str, Any]] = []
         self.missing_fields: List[str] = []
-    
+
     def validate(self, festival_data: FestivalData) -> ValidationResult:
         """
         Run all validations and return comprehensive result.
@@ -49,17 +49,17 @@ class PartyMapSyncValidator:
         self.errors = []
         self.warnings = []
         self.missing_fields = []
-        
+
         # Run all validation checks
         self._validate_basic_info(festival_data)
         self._validate_event_dates(festival_data)
         self._validate_media(festival_data)
         self._validate_classification(festival_data)
         self._validate_optional_fields(festival_data)
-        
+
         # Calculate completeness score
         completeness_score = self._calculate_completeness(festival_data)
-        
+
         # Determine final status
         if self.errors:
             status = "invalid"
@@ -70,7 +70,7 @@ class PartyMapSyncValidator:
         else:
             status = "ready"
             is_valid = True
-        
+
         return ValidationResult(
             is_valid=is_valid,
             status=status,
@@ -79,7 +79,7 @@ class PartyMapSyncValidator:
             warnings=self.warnings,
             missing_fields=self.missing_fields
         )
-    
+
     def _validate_basic_info(self, data: FestivalData) -> None:
         """Validate basic festival information."""
         # Name validation
@@ -102,7 +102,7 @@ class PartyMapSyncValidator:
                 "message": "Name exceeds 500 characters, will be truncated",
                 "severity": "warning"
             })
-        
+
         # Description validation
         if not data.description:
             self.errors.append({
@@ -117,7 +117,7 @@ class PartyMapSyncValidator:
                 "message": f"Description must be at least {self.MIN_DESCRIPTION_LENGTH} characters",
                 "severity": "error"
             })
-        
+
         # Full description validation
         if not data.full_description:
             self.errors.append({
@@ -132,7 +132,7 @@ class PartyMapSyncValidator:
                 "message": f"Full description must be at least {self.MIN_FULL_DESCRIPTION_LENGTH} characters",
                 "severity": "error"
             })
-        
+
         # URL validation (optional but recommended)
         if data.website_url:
             if not self._is_valid_url(str(data.website_url)):
@@ -141,7 +141,7 @@ class PartyMapSyncValidator:
                     "message": "Website URL appears to be invalid",
                     "severity": "warning"
                 })
-        
+
         if data.youtube_url:
             if not self._is_valid_url(str(data.youtube_url)):
                 self.warnings.append({
@@ -149,7 +149,7 @@ class PartyMapSyncValidator:
                     "message": "YouTube URL appears to be invalid",
                     "severity": "warning"
                 })
-    
+
     def _validate_event_dates(self, data: FestivalData) -> None:
         """Validate event dates."""
         if not data.event_dates:
@@ -160,12 +160,12 @@ class PartyMapSyncValidator:
             })
             self.missing_fields.append("event_dates")
             return
-        
+
         now = datetime.now()
-        
+
         for idx, event_date in enumerate(data.event_dates):
             prefix = f"event_dates[{idx}]"
-            
+
             # Start date validation
             if not event_date.start:
                 self.errors.append({
@@ -183,7 +183,7 @@ class PartyMapSyncValidator:
                         "message": "Event date is in the past",
                         "severity": "warning"
                     })
-            
+
             # End date validation
             if event_date.end:
                 if event_date.start and event_date.end <= event_date.start:
@@ -192,7 +192,7 @@ class PartyMapSyncValidator:
                         "message": "End date must be after start date",
                         "severity": "error"
                     })
-                
+
                 # Check if event is too long (more than 30 days)
                 if event_date.start and (event_date.end - event_date.start).days > 30:
                     self.warnings.append({
@@ -200,7 +200,7 @@ class PartyMapSyncValidator:
                         "message": "Event duration exceeds 30 days, please verify",
                         "severity": "warning"
                     })
-            
+
             # Location validation
             if not event_date.location_description:
                 self.errors.append({
@@ -216,7 +216,7 @@ class PartyMapSyncValidator:
                     "message": f"Location must be at least {self.MIN_LOCATION_LENGTH} characters",
                     "severity": "error"
                 })
-            
+
             # Ticket validation
             if event_date.tickets:
                 for t_idx, ticket in enumerate(event_date.tickets):
@@ -227,7 +227,7 @@ class PartyMapSyncValidator:
                                 "message": "Maximum price must be >= minimum price",
                                 "severity": "error"
                             })
-            
+
             # Lineup validation
             if event_date.lineup:
                 # Check for duplicates (case-insensitive)
@@ -239,7 +239,7 @@ class PartyMapSyncValidator:
                         "message": f"Duplicate artists found: {', '.join(duplicates)}",
                         "severity": "warning"
                     })
-    
+
     def _validate_media(self, data: FestivalData) -> None:
         """Validate media items."""
         # Logo is required per PartyMap schema
@@ -258,7 +258,7 @@ class PartyMapSyncValidator:
                     "message": "Logo URL is not a valid URL",
                     "severity": "error"
                 })
-        
+
         # Validate media items
         if data.media_items:
             for idx, media in enumerate(data.media_items):
@@ -268,7 +268,7 @@ class PartyMapSyncValidator:
                         "message": f"Invalid URL for media item {idx + 1}",
                         "severity": "warning"
                     })
-                
+
                 # Check caption length
                 if media.caption and len(media.caption) > 500:
                     self.warnings.append({
@@ -276,7 +276,7 @@ class PartyMapSyncValidator:
                         "message": "Caption exceeds 500 characters, may be truncated",
                         "severity": "warning"
                     })
-    
+
     def _validate_classification(self, data: FestivalData) -> None:
         """Validate tags and category."""
         if not data.tags:
@@ -292,7 +292,7 @@ class PartyMapSyncValidator:
                     "message": f"Too many tags ({len(data.tags)}), only first {self.MAX_TAGS} will be used",
                     "severity": "warning"
                 })
-            
+
             # Check for empty or very short tags
             short_tags = [t for t in data.tags if len(t.strip()) < 2]
             if short_tags:
@@ -301,7 +301,7 @@ class PartyMapSyncValidator:
                     "message": f"Very short tags found: {short_tags}",
                     "severity": "warning"
                 })
-    
+
     def _validate_optional_fields(self, data: FestivalData) -> None:
         """Validate optional fields that improve data quality."""
         # Recurrence rule validation
@@ -312,14 +312,14 @@ class PartyMapSyncValidator:
                     "message": "Invalid recurrence type (must be 0-3)",
                     "severity": "warning"
                 })
-            
+
             if data.rrule.separationCount < 0:
                 self.warnings.append({
                     "field": "rrule.separationCount",
                     "message": "Separation count must be >= 0",
                     "severity": "warning"
                 })
-    
+
     def _calculate_completeness(self, data: FestivalData) -> float:
         """Calculate data completeness score (0.0 - 1.0)."""
         required_fields = {
@@ -329,7 +329,7 @@ class PartyMapSyncValidator:
             "event_dates": bool(data.event_dates),
             "logo": bool(data.logo_url),
         }
-        
+
         optional_fields = {
             "website_url": bool(data.website_url),
             "youtube_url": bool(data.youtube_url),
@@ -340,13 +340,13 @@ class PartyMapSyncValidator:
             "tickets": any(ed.tickets for ed in data.event_dates) if data.event_dates else False,
             "lineup": any(ed.lineup for ed in data.event_dates) if data.event_dates else False,
         }
-        
+
         required_score = sum(required_fields.values()) / len(required_fields)
         optional_score = sum(optional_fields.values()) / len(optional_fields)
-        
+
         # Weight: 70% required, 30% optional
         return (required_score * 0.7) + (optional_score * 0.3)
-    
+
     def _is_valid_url(self, url: str) -> bool:
         """Basic URL validation."""
         try:
@@ -354,14 +354,14 @@ class PartyMapSyncValidator:
             return all([result.scheme in ("http", "https"), result.netloc])
         except Exception:
             return False
-    
+
     def validate_for_create(self, data: FestivalData) -> ValidationResult:
         """
         Validate specifically for creating a new event.
         More strict than update validation.
         """
         result = self.validate(data)
-        
+
         # Additional checks for new events
         if not data.event_dates:
             self.errors.append({
@@ -369,23 +369,23 @@ class PartyMapSyncValidator:
                 "message": "New events must have at least one date",
                 "severity": "error"
             })
-        
+
         return result
-    
+
     def validate_for_update(self, data: FestivalData) -> ValidationResult:
         """
         Validate for updating an existing event.
         Less strict - only validates provided fields.
         """
         result = self.validate(data)
-        
+
         # For updates, we can be more lenient with some fields
         # Remove errors for fields that weren't provided
         if not data.name:
             self.errors = [e for e in self.errors if e["field"] != "name"]
         if not data.description:
             self.errors = [e for e in self.errors if e["field"] != "description"]
-        
+
         # Recalculate status
         if self.errors:
             result.status = "invalid"
@@ -396,7 +396,7 @@ class PartyMapSyncValidator:
         else:
             result.status = "ready"
             result.is_valid = True
-        
+
         return result
 
 

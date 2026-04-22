@@ -1,10 +1,10 @@
 """State definition for Research Agent."""
 
-from typing import Annotated, Optional, Any
-from datetime import datetime
-from langgraph.graph.message import add_messages
+from typing import Annotated, Optional
+
 from langchain_core.messages import BaseMessage
-from pydantic import BaseModel, Field
+from langgraph.graph.message import add_messages
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ResearchState(BaseModel):
@@ -51,8 +51,7 @@ class ResearchState(BaseModel):
     total_prompt_tokens: int = 0
     total_completion_tokens: int = 0
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class ToolProgress(BaseModel):

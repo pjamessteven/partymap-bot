@@ -2,7 +2,8 @@
 
 import json
 import logging
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_openai import ChatOpenAI
 
@@ -10,15 +11,15 @@ logger = logging.getLogger(__name__)
 
 from src.agents.research.state import ResearchState
 from src.agents.research.tools import (
-    ExtractDataTool, SearchAlternativesTool,
-    PartyMapTagTool, YouTubeSearchTool, MediaSelectionTool, TicketExtractionTool,
-    ScreenshotLineupTool
+    ExtractDataTool,
+    MediaSelectionTool,
+    PartyMapTagTool,
+    ScreenshotLineupTool,
+    SearchAlternativesTool,
+    TicketExtractionTool,
+    YouTubeSearchTool,
 )
-from src.agents.shared.playwright_toolkit import (
-    create_playwright_tools,
-    create_playwright_tools_with_existing_browser
-)
-
+from src.agents.shared.playwright_toolkit import create_playwright_tools_with_existing_browser
 
 PLANNER_SYSTEM_PROMPT_NEW = """You are a festival research assistant. Your job is to gather comprehensive information about a NEW festival.
 
@@ -97,13 +98,13 @@ Focus on what's CHANGED or MISSING compared to the existing PartyMap event."""
 async def get_tools(browser, llm, exa, partymap, writer, config_settings=None, cost_tracker=None):
     """Create tool instances with dependencies using PlayWrightBrowserToolkit."""
     from src.agents.research.tools_lineup import LineupExtractionTool
-    
+
     # Get clients from config if available
     musicbrainz = config_settings.get("musicbrainz") if config_settings else None
     vision = config_settings.get("vision") if config_settings else None
-    
+
     tools = []
-    
+
     # Create Playwright browser tools from toolkit
     try:
         # Get the underlying playwright browser from our BrowserService
@@ -115,7 +116,7 @@ async def get_tools(browser, llm, exa, partymap, writer, config_settings=None, c
     except Exception as e:
         logger.error(f"Could not create Playwright toolkit tools: {e}")
         raise  # Serious issue if Playwright fails
-    
+
     # Create research-specific tools
     research_tools = [
         ExtractDataTool(browser=browser, llm=llm, writer=writer, cost_tracker=cost_tracker),
@@ -127,7 +128,7 @@ async def get_tools(browser, llm, exa, partymap, writer, config_settings=None, c
         TicketExtractionTool(browser=browser, llm=llm, writer=writer, cost_tracker=cost_tracker),
     ]
     tools.extend(research_tools)
-    
+
     # Add lineup extraction tool if vision and MusicBrainz clients are available
     if vision and musicbrainz:
         tools.append(LineupExtractionTool(
@@ -137,7 +138,7 @@ async def get_tools(browser, llm, exa, partymap, writer, config_settings=None, c
             writer=writer,
             cost_tracker=cost_tracker
         ))
-    
+
     return tools
 
 
@@ -214,7 +215,7 @@ async def tools_node(state: ResearchState, config: RunnableConfig) -> dict:
     Includes budget checking and cost tracking.
     """
     from src.agents.research.cost_tracker import CostTracker
-    
+
     last_message = state.messages[-1] if state.messages else None
 
     if not last_message or not last_message.tool_calls:
@@ -227,7 +228,7 @@ async def tools_node(state: ResearchState, config: RunnableConfig) -> dict:
         "total_cents": state.total_cost_cents,
         "is_exceeded": state.budget_exceeded
     })
-    
+
     if cost_tracker.is_exceeded:
         writer = config.get("writer")
         if writer:
@@ -237,7 +238,7 @@ async def tools_node(state: ResearchState, config: RunnableConfig) -> dict:
                 "total_cost": state.total_cost_cents,
                 "budget": state.budget_cents
             })
-        
+
         return {
             "error": f"Budget exceeded: {state.total_cost_cents}c / {state.budget_cents}c",
             "budget_exceeded": True,
@@ -277,11 +278,11 @@ async def tools_node(state: ResearchState, config: RunnableConfig) -> dict:
                     })
                 else:
                     result = await tool.ainvoke(tool_args)
-                    
+
                     # Track Exa search costs
                     if tool_name == "search_alternatives":
                         cost_tracker.track_exa_search(tool_name)
-                        
+
             except Exception as e:
                 result = f"Tool execution failed: {str(e)}"
 
@@ -291,7 +292,7 @@ async def tools_node(state: ResearchState, config: RunnableConfig) -> dict:
 
     # Update cost state
     cost_report = cost_tracker.get_report()
-    
+
     return {
         "messages": tool_results,
         "cost_tracker": cost_report.get("per_tool", {}),
@@ -412,9 +413,9 @@ async def evaluator_node(state: ResearchState, config: RunnableConfig) -> dict:
 
     if has_minimum and (not missing or all("(optional)" in m for m in missing)):
         # We have enough data - build final result
-        from src.core.schemas import FestivalData, EventDateData, MediaItem, RRuleData
-        from datetime import datetime
         from dateutil import parser
+
+        from src.core.schemas import EventDateData, FestivalData, MediaItem, RRuleData
 
         event_dates = []
         if collected.get("event_dates"):

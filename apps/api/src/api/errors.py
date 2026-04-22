@@ -1,14 +1,14 @@
 """API routes for error tracking, dead letter queue, and circuit breaker monitoring."""
 
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select, func, desc
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
-from src.core.models import Festival, FestivalState
+from src.core.models import Festival
 from src.core.schemas import FestivalData
 from src.core.validators import validate_festival_for_sync
 from src.services.circuit_breaker import get_all_circuit_breakers, get_circuit_breaker_metrics

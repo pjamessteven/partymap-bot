@@ -2,13 +2,12 @@
 
 import uuid
 from datetime import datetime, timedelta
-from src.utils.utc_now import utc_now
 from enum import Enum as PyEnum
 from typing import List, Optional
 
 from sqlalchemy import (
-    JSON,
     ARRAY,
+    JSON,
     Boolean,
     DateTime,
     Float,
@@ -17,10 +16,11 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
-    Enum,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+from src.utils.utc_now import utc_now
 
 
 class Base(DeclarativeBase):
@@ -34,27 +34,27 @@ class FestivalState(str, PyEnum):
 
     # Discovery phase
     DISCOVERED = "discovered"
-    
+
     # New workflow states (integrated deduplication)
     NEEDS_RESEARCH_NEW = "needs_research_new"      # New festival, needs full research
     NEEDS_RESEARCH_UPDATE = "needs_research_update"  # Existing event, needs update research
-    
+
     # Research phase
     RESEARCHING = "researching"
     RESEARCHED = "researched"
     RESEARCHED_PARTIAL = "researched_partial"
     UPDATE_IN_PROGRESS = "update_in_progress"
     UPDATE_COMPLETE = "update_complete"
-    
+
     # Sync phase
     SYNCING = "syncing"
     SYNCED = "synced"
-    
+
     # Validation states (NEW)
     VALIDATING = "validating"
     VALIDATION_FAILED = "validation_failed"
     QUARANTINED = "quarantined"
-    
+
     # End states
     FAILED = "failed"
     SKIPPED = "skipped"
@@ -99,12 +99,12 @@ class Festival(Base):
     # For series: track if this is a new date for existing event
     is_new_event_date: Mapped[bool] = mapped_column(Boolean, default=False)
     date_confirmed: Mapped[bool] = mapped_column(Boolean, default=True)  # If False, need to update
-    
+
     # Update workflow tracking (NEW: for integrated deduplication)
     update_required: Mapped[bool] = mapped_column(Boolean, default=False)
     update_reasons: Mapped[list] = mapped_column(JSON, default=list)  # ["missing_dates", "dates_unconfirmed", "location_change", "lineup_released", "event_cancelled"]
     existing_event_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)  # Cached PartyMap event data
-    
+
     # Workflow type tracking
     workflow_type: Mapped[Optional[str]] = mapped_column(
         String(20), nullable=True, default=None
@@ -118,12 +118,12 @@ class Festival(Base):
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
     last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     skip_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    
+
     # Research failure tracking
     failure_reason: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, index=True)
     failure_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     research_completeness_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    
+
     # Validation tracking (NEW)
     validation_status: Mapped[str] = mapped_column(
         String(20), default="pending"
@@ -131,7 +131,7 @@ class Festival(Base):
     validation_errors: Mapped[list] = mapped_column(JSON, default=list)
     validation_warnings: Mapped[list] = mapped_column(JSON, default=list)
     validation_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    
+
     # Enhanced error tracking (NEW)
     error_category: Mapped[Optional[str]] = mapped_column(
         String(50), nullable=True
@@ -140,7 +140,7 @@ class Festival(Base):
     first_error_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_retry_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     max_retries_reached: Mapped[bool] = mapped_column(Boolean, default=False)
-    
+
     # Quarantine tracking (NEW)
     quarantined_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     quarantine_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

@@ -1,15 +1,14 @@
 """Job activity logging service with DB persistence."""
 
-from datetime import datetime, timedelta
-from src.utils.utc_now import utc_now
-from typing import Optional, List
+from datetime import timedelta
+from typing import List, Optional
 from uuid import UUID
 
-from sqlalchemy import select, delete
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import delete, select
 
-from src.core.models import JobActivity
 from src.core.database import AsyncSessionLocal
+from src.core.models import JobActivity
+from src.utils.utc_now import utc_now
 
 
 class JobActivityLogger:

@@ -1,15 +1,16 @@
 """API routes for refresh pipeline approvals."""
 
-from typing import Optional, List
+from datetime import timedelta
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
-from datetime import datetime, timedelta
-from src.utils.utc_now import utc_now
 
 from src.core.database import get_db
 from src.core.models import RefreshApproval
 from src.tasks.refresh_pipeline import apply_approved_refresh_task
+from src.utils.utc_now import utc_now
 
 router = APIRouter()
 

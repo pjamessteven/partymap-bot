@@ -175,8 +175,8 @@ Rules:
             data = json.loads(response)
 
             # Convert to FestivalData
-            from datetime import datetime
             from dateutil import parser
+
             from src.core.schemas import RRuleData
 
             # Build event date

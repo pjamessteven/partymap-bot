@@ -1,8 +1,7 @@
 """Maintenance tasks for cleanup and housekeeping."""
 
 import logging
-from datetime import datetime, timedelta
-from src.utils.utc_now import utc_now
+from datetime import timedelta
 
 from celery import shared_task
 from sqlalchemy import delete, select
@@ -10,6 +9,7 @@ from sqlalchemy import delete, select
 from src.config import get_settings
 from src.core.database import AsyncSessionLocal
 from src.core.models import Festival, FestivalState
+from src.utils.utc_now import utc_now
 
 logger = logging.getLogger(__name__)
 settings = get_settings()

@@ -4,14 +4,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
-from src.core.models import SystemSettings
-from src.config import get_settings
-from src.tasks.goabase_tasks import (
-    goabase_sync_task,
-    goabase_sync_stop_task,
-    get_goabase_sync_status,
-)
 from src.dashboard.settings_router import get_setting_value, update_setting
+from src.tasks.goabase_tasks import (
+    get_goabase_sync_status,
+    goabase_sync_stop_task,
+    goabase_sync_task,
+)
 
 router = APIRouter(prefix="/goabase", tags=["goabase"])
 
@@ -32,10 +30,10 @@ async def start_goabase_sync(
             status_code=409,
             detail="Goabase sync is already running"
         )
-    
+
     # Trigger Celery task
     task = goabase_sync_task.delay()
-    
+
     return {
         "status": "started",
         "task_id": task.id,
@@ -85,12 +83,12 @@ async def get_goabase_settings(
         "goabase_sync_day",
         "goabase_sync_hour",
     ]
-    
+
     settings = {}
     for key in settings_keys:
         value = await get_setting_value(db, key)
         settings[key] = value
-    
+
     return settings
 
 
@@ -114,7 +112,7 @@ async def update_goabase_settings(
         "goabase_sync_day": "string",
         "goabase_sync_hour": "integer",
     }
-    
+
     # Validate inputs
     for key, value in settings.items():
         if key not in valid_keys:
@@ -122,14 +120,14 @@ async def update_goabase_settings(
                 status_code=400,
                 detail=f"Invalid setting: {key}. Valid settings: {list(valid_keys.keys())}"
             )
-        
+
         # Validate frequency
         if key == "goabase_sync_frequency" and value not in ["daily", "weekly", "monthly"]:
             raise HTTPException(
                 status_code=400,
                 detail="goabase_sync_frequency must be: daily, weekly, or monthly"
             )
-        
+
         # Validate day
         if key == "goabase_sync_day":
             valid_days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
@@ -138,7 +136,7 @@ async def update_goabase_settings(
                     status_code=400,
                     detail=f"goabase_sync_day must be one of: {', '.join(valid_days)}"
                 )
-        
+
         # Validate hour
         if key == "goabase_sync_hour":
             try:
@@ -150,11 +148,11 @@ async def update_goabase_settings(
                     status_code=400,
                     detail="goabase_sync_hour must be an integer between 0 and 23"
                 )
-    
+
     # Update settings
     for key, value in settings.items():
         await update_setting(db, key, str(value).lower() if isinstance(value, bool) else str(value))
-    
+
     return {
         "status": "success",
         "message": "Goabase settings updated",

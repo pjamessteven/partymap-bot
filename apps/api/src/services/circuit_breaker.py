@@ -21,8 +21,8 @@ import logging
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, Optional, Type
 from functools import wraps
+from typing import Any, Callable, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ class CircuitState(Enum):
 
 class CircuitBreakerOpen(Exception):
     """Raised when circuit breaker is open."""
-    
+
     def __init__(self, service: str, seconds_until_retry: float):
         self.service = service
         self.seconds_until_retry = seconds_until_retry
@@ -46,19 +46,19 @@ class CircuitBreakerOpen(Exception):
 @dataclass
 class CircuitBreakerConfig:
     """Configuration for circuit breaker."""
-    
+
     # Thresholds
     failure_threshold: int = 5           # Failures before opening
     recovery_timeout: float = 30.0       # Seconds before half-open
     half_open_max_calls: int = 3         # Calls to allow in half-open state
-    
+
     # Timing
     failure_window: float = 60.0         # Window for counting failures (seconds)
     success_threshold: int = 2           # Successes needed to close from half-open
-    
+
     # Exceptions that count as failures
     expected_exceptions: tuple = field(default_factory=lambda: (Exception,))
-    
+
     # Exceptions that are always failures (don't count toward threshold)
     ignored_exceptions: tuple = field(default_factory=tuple)
 
@@ -66,7 +66,7 @@ class CircuitBreakerConfig:
 @dataclass
 class CircuitBreakerMetrics:
     """Metrics for circuit breaker monitoring."""
-    
+
     state: CircuitState
     failure_count: int = 0
     success_count: int = 0
@@ -77,7 +77,7 @@ class CircuitBreakerMetrics:
     total_calls: int = 0
     total_failures: int = 0
     total_successes: int = 0
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "state": self.state.value,
@@ -95,21 +95,21 @@ class CircuitBreakerMetrics:
 
 class CircuitBreaker:
     """Circuit breaker for external service calls."""
-    
+
     _instances: Dict[str, "CircuitBreaker"] = {}
-    
+
     def __new__(cls, name: str, config: Optional[CircuitBreakerConfig] = None):
         """Singleton pattern - one circuit breaker per service name."""
         if name not in cls._instances:
             instance = super().__new__(cls)
             cls._instances[name] = instance
         return cls._instances[name]
-    
+
     def __init__(self, name: str, config: Optional[CircuitBreakerConfig] = None):
         # Only initialize once (singleton pattern)
         if hasattr(self, '_initialized'):
             return
-        
+
         self.name = name
         self.config = config or CircuitBreakerConfig()
         self._state = CircuitState.CLOSED
@@ -119,20 +119,20 @@ class CircuitBreaker:
         self._lock = asyncio.Lock()
         self._metrics = CircuitBreakerMetrics(state=CircuitState.CLOSED)
         self._opened_at: Optional[float] = None
-        
+
         self._initialized = True
-    
+
     @property
     def state(self) -> CircuitState:
         """Current circuit state."""
         return self._state
-    
+
     @property
     def metrics(self) -> CircuitBreakerMetrics:
         """Current metrics."""
         self._metrics.state = self._state
         return self._metrics
-    
+
     async def call(self, func: Callable, *args, **kwargs) -> Any:
         """
         Execute function with circuit breaker protection.
@@ -146,20 +146,20 @@ class CircuitBreaker:
         """
         async with self._lock:
             await self._update_state()
-            
+
             if self._state == CircuitState.OPEN:
                 seconds_until_retry = self._get_seconds_until_retry()
                 logger.warning(f"Circuit breaker OPEN for {self.name}, failing fast")
                 raise CircuitBreakerOpen(self.name, seconds_until_retry)
-            
+
             if self._state == CircuitState.HALF_OPEN:
                 if self._half_open_calls >= self.config.half_open_max_calls:
                     seconds_until_retry = self._get_seconds_until_retry()
                     raise CircuitBreakerOpen(self.name, seconds_until_retry)
                 self._half_open_calls += 1
-            
+
             self._metrics.total_calls += 1
-        
+
         # Execute the function outside the lock
         try:
             result = await func(*args, **kwargs)
@@ -168,7 +168,7 @@ class CircuitBreaker:
         except Exception as e:
             await self._on_failure(e)
             raise
-    
+
     async def _update_state(self):
         """Update circuit state based on timing."""
         if self._state == CircuitState.OPEN:
@@ -178,16 +178,16 @@ class CircuitBreaker:
                 self._state = CircuitState.HALF_OPEN
                 self._half_open_calls = 0
                 self._half_open_successes = 0
-    
+
     async def _on_success(self):
         """Handle successful call."""
         async with self._lock:
             self._metrics.total_successes += 1
             self._metrics.last_success_time = time.time()
-            
+
             if self._state == CircuitState.HALF_OPEN:
                 self._half_open_successes += 1
-                
+
                 # Check if we can close the circuit
                 if self._half_open_successes >= self.config.success_threshold:
                     logger.info(f"Circuit breaker {self.name} transitioning to CLOSED")
@@ -198,21 +198,21 @@ class CircuitBreaker:
             else:
                 # In CLOSED state, clear old failures
                 self._cleanup_old_failures()
-    
+
     async def _on_failure(self, exception: Exception):
         """Handle failed call."""
         # Check if we should ignore this exception
         if isinstance(exception, self.config.ignored_exceptions):
             return
-        
+
         async with self._lock:
             self._metrics.total_failures += 1
             self._metrics.last_failure_time = time.time()
-            
+
             now = time.time()
             self._failure_times.append(now)
             self._cleanup_old_failures()
-            
+
             if self._state == CircuitState.HALF_OPEN:
                 # Failure in half-open state -> open immediately
                 logger.warning(f"Circuit breaker {self.name} failure in HALF_OPEN, opening")
@@ -225,21 +225,21 @@ class CircuitBreaker:
                         f"({len(self._failure_times)} failures in {self.config.failure_window}s)"
                     )
                     await self._open_circuit()
-            
+
             self._metrics.failure_count = len(self._failure_times)
-    
+
     async def _open_circuit(self):
         """Open the circuit."""
         self._state = CircuitState.OPEN
         self._opened_at = time.time()
         self._metrics.opened_at = self._opened_at
         logger.error(f"Circuit breaker {self.name} OPENED")
-    
+
     def _cleanup_old_failures(self):
         """Remove failures outside the window."""
         cutoff = time.time() - self.config.failure_window
         self._failure_times = [t for t in self._failure_times if t > cutoff]
-    
+
     def _get_seconds_until_retry(self) -> float:
         """Calculate seconds until next retry attempt."""
         if self._state == CircuitState.OPEN and self._opened_at:
@@ -247,7 +247,7 @@ class CircuitBreaker:
             remaining = self.config.recovery_timeout - elapsed
             return max(0, remaining)
         return 0
-    
+
     def reset(self):
         """Manually reset the circuit breaker to CLOSED state."""
         self._state = CircuitState.CLOSED
@@ -290,16 +290,16 @@ def circuit_breaker(
         ignored_exceptions=ignored_exceptions,
     )
     breaker = CircuitBreaker(name, config)
-    
+
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         async def wrapper(*args, **kwargs):
             return await breaker.call(func, *args, **kwargs)
-        
+
         # Attach circuit breaker for manual control
         wrapper._circuit_breaker = breaker
         return wrapper
-    
+
     return decorator
 
 
@@ -307,7 +307,7 @@ def circuit_breaker(
 
 class ServiceCircuitBreakers:
     """Pre-configured circuit breakers for external services."""
-    
+
     @staticmethod
     def get_partymap_breaker() -> CircuitBreaker:
         """Circuit breaker for PartyMap API."""
@@ -320,7 +320,7 @@ class ServiceCircuitBreakers:
                 expected_exceptions=(Exception,),
             )
         )
-    
+
     @staticmethod
     def get_exa_breaker() -> CircuitBreaker:
         """Circuit breaker for Exa API."""
@@ -333,7 +333,7 @@ class ServiceCircuitBreakers:
                 expected_exceptions=(Exception,),
             )
         )
-    
+
     @staticmethod
     def get_llm_breaker() -> CircuitBreaker:
         """Circuit breaker for LLM/OpenRouter API."""

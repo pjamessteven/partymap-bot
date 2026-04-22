@@ -1,8 +1,7 @@
 """Celery tasks and API endpoints for Goabase sync."""
 
 import logging
-from datetime import datetime
-from typing import Dict, Any
+from typing import Any, Dict
 
 from celery import shared_task
 from celery.exceptions import SoftTimeLimitExceeded
@@ -25,9 +24,9 @@ def goabase_sync_task(self) -> Dict[str, Any]:
     Hard time limit: 2 hours (force kill)
     """
     import asyncio
-    
+
     settings = get_settings()
-    
+
     # Check if sync is already running
     if sync_manager.status.is_running:
         logger.warning("Goabase sync already running, skipping")
@@ -36,11 +35,11 @@ def goabase_sync_task(self) -> Dict[str, Any]:
             "reason": "Sync already running",
             "current_status": sync_manager.status.__dict__
         }
-    
+
     async def _sync():
         async with GoabaseSync(settings, sync_manager) as sync:
             return await sync.sync_all()
-    
+
     try:
         logger.info("Starting Goabase sync task")
         result = asyncio.run(_sync())
@@ -48,7 +47,7 @@ def goabase_sync_task(self) -> Dict[str, Any]:
         result["task_id"] = self.request.id
         logger.info(f"Goabase sync task completed: {result}")
         return result
-        
+
     except SoftTimeLimitExceeded:
         logger.warning("Goabase sync task hit soft time limit, stopping gracefully")
         sync_manager.request_stop()
@@ -57,7 +56,7 @@ def goabase_sync_task(self) -> Dict[str, Any]:
             "reason": "Time limit exceeded",
             "current_status": sync_manager.status.__dict__
         }
-        
+
     except Exception as e:
         logger.error(f"Goabase sync task failed: {e}")
         sync_manager.mark_complete()
@@ -74,7 +73,7 @@ def goabase_sync_stop_task() -> Dict[str, Any]:
             "status": "not_running",
             "message": "No Goabase sync is currently running"
         }
-    
+
     sync_manager.request_stop()
     return {
         "status": "stop_requested",
@@ -105,6 +104,6 @@ def _calculate_progress(status) -> int:
     """Calculate progress percentage."""
     if status.total_found == 0:
         return 0
-    
+
     processed = status.new_count + status.update_count + status.unchanged_count + status.error_count
     return min(100, int((processed / status.total_found) * 100))

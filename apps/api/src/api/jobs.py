@@ -1,21 +1,20 @@
 """API routes for job control and monitoring."""
 
 import json
-import asyncio
 from typing import List, Optional
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, HTTPException, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
-from datetime import datetime
-from src.utils.utc_now import utc_now
 
-from src.core.database import get_db
-from src.core.job_tracker import JobTracker, JobType, JobStatus
-from src.core.job_activity import JobActivityLogger
-from src.core.models import JobActivity, PipelineSchedule
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.agents.streaming.broadcaster import get_broadcaster
+from src.core.database import get_db
+from src.core.job_activity import JobActivityLogger
+from src.core.job_tracker import JobTracker, JobType
+from src.core.models import PipelineSchedule
 from src.tasks.celery_app import discovery_pipeline, research_pipeline, sync_pipeline
 from src.tasks.goabase_sync import goabase_sync_pipeline
+from src.utils.utc_now import utc_now
 
 router = APIRouter()
 
@@ -218,9 +217,9 @@ async def start_jobs_bulk(
         # Start the job via Celery task
         from src.tasks.pipeline import (
             run_discovery_task,
+            run_goabase_sync_task,
             run_research_task,
             run_sync_task,
-            run_goabase_sync_task,
         )
 
         task_map = {

@@ -4,7 +4,7 @@ import logging
 from typing import List, Optional
 
 import httpx
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel
 
 from src.config import Settings
 

@@ -2,14 +2,15 @@
 
 import json
 from datetime import datetime
-from typing import Optional, Type, Any
+from typing import Any, Optional, Type
+
 from langchain.tools import BaseTool
 from pydantic import BaseModel, Field
 
-from src.services.browser_service import BrowserService
-from src.services.llm_client import LLMClient
-from src.services.exa_client import ExaClient
 from src.partymap.client import PartyMapClient
+from src.services.browser_service import BrowserService
+from src.services.exa_client import ExaClient
+from src.services.llm_client import LLMClient
 
 
 class NavigateInput(BaseModel):
@@ -172,7 +173,7 @@ class ExtractDataTool(BaseTool):
                 })
 
             festival_data = await self.llm.extract_festival_data(html, url)
-            
+
             # Track cost (estimated ~5 cents for extract_data)
             if self.cost_tracker:
                 self.cost_tracker.track_tool_execution("extract_data", 5)
@@ -674,7 +675,7 @@ class MediaSelectionTool(BaseTool):
             True if valid, False otherwise
         """
         import httpx
-        
+
         try:
             async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
                 # Use HEAD request first (lighter)
@@ -683,18 +684,18 @@ class MediaSelectionTool(BaseTool):
                 except Exception:
                     # Fallback to GET if HEAD fails
                     response = await client.get(url)
-                
+
                 # Check status code
                 if response.status_code != 200:
                     logger.debug(f"Image validation failed - status {response.status_code}: {url}")
                     return False
-                
+
                 # Check content type
                 content_type = response.headers.get("content-type", "").lower()
                 if not content_type.startswith("image/"):
                     logger.debug(f"Image validation failed - not an image ({content_type}): {url}")
                     return False
-                
+
                 # Check file size (avoid huge images)
                 content_length = response.headers.get("content-length")
                 if content_length:
@@ -705,9 +706,9 @@ class MediaSelectionTool(BaseTool):
                     if size_bytes < 1000:  # Less than 1KB is probably an icon/tracking pixel
                         logger.debug(f"Image validation failed - too small ({size_bytes} bytes): {url}")
                         return False
-                
+
                 return True
-                
+
         except httpx.TimeoutException:
             logger.debug(f"Image validation failed - timeout: {url}")
             return False

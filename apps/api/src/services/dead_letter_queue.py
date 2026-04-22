@@ -11,18 +11,18 @@ Features:
 """
 
 import logging
-from datetime import datetime, timedelta
-from src.utils.utc_now import utc_now
+from datetime import timedelta
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from sqlalchemy import select, update, delete, and_
+from sqlalchemy import and_, delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.error_classification import ErrorCategory
 from src.core.models import Festival, FestivalState
 from src.core.schemas import FestivalData
 from src.core.validators import validate_festival_for_sync
-from src.core.error_classification import ErrorCategory
+from src.utils.utc_now import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -33,10 +33,10 @@ MAX_RETRIES_BEFORE_QUARANTINE = 5
 
 class DeadLetterQueue:
     """Dead Letter Queue for quarantining failed festivals."""
-    
+
     def __init__(self, db: AsyncSession):
         self.db = db
-    
+
     async def quarantine(
         self,
         festival_id: UUID,
@@ -55,7 +55,7 @@ class DeadLetterQueue:
         """
         try:
             now = utc_now()
-            
+
             result = await self.db.execute(
                 update(Festival)
                 .where(Festival.id == festival_id)
@@ -69,9 +69,9 @@ class DeadLetterQueue:
                     updated_at=now,
                 )
             )
-            
+
             await self.db.commit()
-            
+
             if result.rowcount > 0:
                 logger.warning(
                     f"Festival {festival_id} quarantined: {reason}"
@@ -80,12 +80,12 @@ class DeadLetterQueue:
             else:
                 logger.error(f"Festival {festival_id} not found for quarantine")
                 return False
-                
+
         except Exception as e:
             logger.error(f"Failed to quarantine festival {festival_id}: {e}")
             await self.db.rollback()
             return False
-    
+
     async def should_quarantine(self, festival_id: UUID) -> bool:
         """
         Check if a festival should be quarantined based on retry count.
@@ -98,18 +98,18 @@ class DeadLetterQueue:
             .where(Festival.id == festival_id)
         )
         row = result.first()
-        
+
         if not row:
             return False
-        
+
         retry_count, max_reached = row
-        
+
         # Quarantine if max retries reached or retry count exceeds threshold
         if max_reached or (retry_count and retry_count >= MAX_RETRIES_BEFORE_QUARANTINE):
             return True
-        
+
         return False
-    
+
     async def retry(
         self,
         festival_id: UUID,
@@ -130,26 +130,26 @@ class DeadLetterQueue:
                 select(Festival).where(Festival.id == festival_id)
             )
             festival = result.scalar_one_or_none()
-            
+
             if not festival:
                 return {
                     "success": False,
                     "message": "Festival not found",
                 }
-            
+
             if festival.state != FestivalState.QUARANTINED.value and not force:
                 return {
                     "success": False,
                     "message": f"Festival is not quarantined (current state: {festival.state})",
                 }
-            
+
             # Validate if we have research data
             validation_result = None
             if festival.research_data:
                 try:
                     festival_data = FestivalData(**festival.research_data)
                     validation_result = validate_festival_for_sync(festival_data)
-                    
+
                     if not validation_result.is_valid and not force:
                         return {
                             "success": False,
@@ -162,11 +162,11 @@ class DeadLetterQueue:
                             "success": False,
                             "message": f"Failed to validate festival data: {e}",
                         }
-            
+
             # Reset retry count and state
             now = utc_now()
             target_state = (new_state.value if new_state else None) or FestivalState.NEEDS_RESEARCH_NEW.value
-            
+
             await self.db.execute(
                 update(Festival)
                 .where(Festival.id == festival_id)
@@ -186,18 +186,18 @@ class DeadLetterQueue:
                     updated_at=now,
                 )
             )
-            
+
             await self.db.commit()
-            
+
             logger.info(f"Festival {festival_id} retried from quarantine, new state: {target_state}")
-            
+
             return {
                 "success": True,
                 "message": f"Festival moved to {target_state.value}",
                 "new_state": target_state.value,
                 "validation": validation_result.dict() if validation_result else None,
             }
-            
+
         except Exception as e:
             logger.error(f"Failed to retry festival {festival_id}: {e}")
             await self.db.rollback()
@@ -205,7 +205,7 @@ class DeadLetterQueue:
                 "success": False,
                 "message": f"Error retrying festival: {e}",
             }
-    
+
     async def get_quarantined(
         self,
         limit: int = 50,
@@ -221,26 +221,26 @@ class DeadLetterQueue:
         :return: List of quarantined festivals
         """
         query = select(Festival).where(Festival.state == FestivalState.QUARANTINED.value)
-        
+
         if error_category:
             query = query.where(Festival.error_category == error_category)
-        
+
         query = query.order_by(Festival.quarantined_at.desc())
         query = query.limit(limit).offset(offset)
-        
+
         result = await self.db.execute(query)
         return list(result.scalars().all())
-    
+
     async def get_quarantined_count(self, error_category: Optional[str] = None) -> int:
         """Get count of quarantined festivals."""
         query = select(Festival).where(Festival.state == FestivalState.QUARANTINED.value)
-        
+
         if error_category:
             query = query.where(Festival.error_category == error_category)
-        
+
         result = await self.db.execute(query)
         return len(result.scalars().all())
-    
+
     async def cleanup_expired(self) -> int:
         """
         Remove festivals that have been quarantined for more than 30 days.
@@ -248,7 +248,7 @@ class DeadLetterQueue:
         :return: Number of festivals removed
         """
         cutoff = utc_now() - timedelta(days=QUARANTINE_RETENTION_DAYS)
-        
+
         try:
             result = await self.db.execute(
                 delete(Festival)
@@ -259,20 +259,20 @@ class DeadLetterQueue:
                     )
                 )
             )
-            
+
             await self.db.commit()
-            
+
             count = result.rowcount
             if count > 0:
                 logger.info(f"Cleaned up {count} expired quarantined festivals")
-            
+
             return count
-            
+
         except Exception as e:
             logger.error(f"Failed to cleanup expired quarantined festivals: {e}")
             await self.db.rollback()
             return 0
-    
+
     async def bulk_retry(
         self,
         festival_ids: List[UUID],
@@ -293,23 +293,23 @@ class DeadLetterQueue:
             "failed": 0,
             "details": [],
         }
-        
+
         for festival_id in festival_ids:
             result = await self.retry(festival_id, force=force, new_state=new_state)
-            
+
             if result["success"]:
                 results["successful"] += 1
             else:
                 results["failed"] += 1
-            
+
             results["details"].append({
                 "festival_id": str(festival_id),
                 "success": result["success"],
                 "message": result["message"],
             })
-        
+
         return results
-    
+
     async def get_quarantine_stats(self) -> Dict[str, Any]:
         """
         Get statistics about quarantined festivals.
@@ -322,15 +322,15 @@ class DeadLetterQueue:
             .where(Festival.state == FestivalState.QUARANTINED.value)
         )
         rows = result.all()
-        
+
         by_category = {}
         for row in rows:
             category = row.error_category or "unknown"
             by_category[category] = by_category.get(category, 0) + 1
-        
+
         # Get total count
         total = len(rows)
-        
+
         # Get expiring soon (within 7 days)
         week_from_now = utc_now() + timedelta(days=7)
         expiring_result = await self.db.execute(
@@ -343,7 +343,7 @@ class DeadLetterQueue:
             )
         )
         expiring_soon = len(expiring_result.scalars().all())
-        
+
         return {
             "total_quarantined": total,
             "by_category": by_category,
@@ -372,7 +372,7 @@ async def check_and_quarantine(
     :return: True if festival was quarantined
     """
     dlq = DeadLetterQueue(db)
-    
+
     if await dlq.should_quarantine(festival_id):
         return await dlq.quarantine(
             festival_id=festival_id,
@@ -380,5 +380,5 @@ async def check_and_quarantine(
             error_category=error_category,
             error_context=error_context,
         )
-    
+
     return False

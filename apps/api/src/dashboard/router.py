@@ -1,8 +1,7 @@
 """Dashboard API routes."""
 
 import logging
-from datetime import datetime, timedelta
-from src.utils.utc_now import utc_now
+from datetime import timedelta
 from typing import List, Optional
 from uuid import UUID
 
@@ -29,11 +28,11 @@ from src.core.schemas import (
     FestivalActionResult,
     FestivalPendingAction,
 )
-from src.tasks.celery_app import discovery_pipeline, research_pipeline, sync_pipeline
-from src.tasks.goabase_sync import goabase_sync_pipeline
-from src.core.job_tracker import JobTracker, JobType
 from src.dashboard.schedule_router import router as schedule_router
 from src.dashboard.settings_router import router as settings_router
+from src.tasks.celery_app import discovery_pipeline, research_pipeline, sync_pipeline
+from src.tasks.goabase_sync import goabase_sync_pipeline
+from src.utils.utc_now import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +141,8 @@ async def list_festivals(
                 "retry_count": f.retry_count,
                 "created_at": f.created_at.isoformat() if f.created_at else None,
                 "research_data": f.research_data,
+                "partymap_event_id": str(f.partymap_event_id) if f.partymap_event_id else None,
+                "partymap_date_id": str(f.partymap_date_id) if f.partymap_date_id else None,
             }
             for f in festivals
         ],
@@ -217,6 +218,7 @@ async def get_pending_festivals(
                 created_at=festival.created_at,
                 retry_count=festival.retry_count,
                 last_error=festival.last_error,
+                partymap_event_id=str(festival.partymap_event_id) if festival.partymap_event_id else None,
             )
         )
 
@@ -605,11 +607,13 @@ async def deduplicate_festival(
         )
 
     # Run deduplication synchronously for immediate result
+    import asyncio
+
     from sqlalchemy.orm import Session
+
+    from src.config import get_settings
     from src.core.database import sync_engine
     from src.partymap.client import PartyMapClient
-    from src.config import get_settings
-    import asyncio
 
     settings = get_settings()
     sync_session = Session(bind=sync_engine)
@@ -782,81 +786,81 @@ async def bulk_research_festivals(
     Limits to 50 festivals per day for cost control.
     """
     settings = get_settings()
-    
+
     # Check auto_process setting - require manual mode for bulk operations
     auto_process_result = await db.execute(
         select(SystemSettings).where(SystemSettings.key == "auto_process")
     )
     auto_process_setting = auto_process_result.scalar_one_or_none()
-    
+
     if auto_process_setting and auto_process_setting.value == "true":
         raise HTTPException(
             status_code=400,
             detail="Bulk research requires manual mode. Disable auto_process in settings first."
         )
-    
+
     # Check daily limit (50 per day as per requirement #4)
     today_start = utc_now().replace(hour=0, minute=0, second=0, microsecond=0)
-    
+
     # Count research tasks queued today
     today_research_count = await _get_today_research_count()
     remaining_today = 50 - today_research_count
-    
+
     if remaining_today <= 0:
         raise HTTPException(
             status_code=429,
             detail=f"Daily limit of 50 bulk research operations reached. Try again tomorrow."
         )
-    
+
     # Adjust limit to remaining daily quota
     limit = min(limit, remaining_today)
-    
+
     # Build query based on filters
     query = select(Festival).where(
         Festival.state.in_([FestivalState.FAILED.value, FestivalState.RESEARCHED_PARTIAL.value]),
         Festival.retry_count < max_retry_count
     )
-    
+
     # Apply failure reason filter
     if failure_reason:
         query = query.where(Festival.failure_reason == failure_reason)
     else:
         # Default: 'dates' failure reason (as per requirement #3)
         query = query.where(Festival.failure_reason == "dates")
-    
+
     # Apply completeness filter
     if min_completeness > 0:
         query = query.where(
             Festival.research_completeness_score >= min_completeness
         )
-    
+
     query = query.limit(limit)
-    
+
     # Execute query
     result = await db.execute(query)
     festivals = result.scalars().all()
-    
+
     if not festivals:
         return {
             "queued": 0,
             "message": "No festivals match the specified criteria",
             "daily_remaining": remaining_today
         }
-    
+
     # Queue research tasks
     queued = 0
     task_ids = []
-    
+
     for festival in festivals:
         try:
             # Reset retry count for failed festivals
             if festival.state == FestivalState.FAILED.value:
                 festival.retry_count = 0
                 festival.last_error = None
-            
+
             # Update state
             festival.state = FestivalState.RESEARCHING.value
-            
+
             # Log transition
             transition = StateTransition(
                 festival_id=festival.id,
@@ -865,20 +869,20 @@ async def bulk_research_festivals(
                 reason=f"Bulk research: {failure_reason or 'dates'}"
             )
             db.add(transition)
-            
+
             # Queue research task
             task = research_pipeline.delay(str(festival.id))
             task_ids.append(task.id)
             queued += 1
-            
+
             logger.info(f"Queued bulk research for festival {festival.id} ({festival.name})")
-            
+
         except Exception as e:
             logger.error(f"Failed to queue research for festival {festival.id}: {e}")
             # Continue with other festivals
-    
+
     await db.commit()
-    
+
     # Increment daily counter
     if queued > 0:
         await _increment_today_research_count(queued)
@@ -886,7 +890,7 @@ async def bulk_research_festivals(
         new_remaining = 50 - today_research_count
     else:
         new_remaining = remaining_today
-    
+
     return {
         "queued": queued,
         "total_matched": len(festivals),

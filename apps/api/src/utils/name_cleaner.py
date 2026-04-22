@@ -1,11 +1,11 @@
 """Name cleaning utilities for deduplication."""
 
 import re
-from datetime import datetime
-from src.utils.utc_now import utc_now
 from typing import Optional
 
 from sqlalchemy import select
+
+from src.utils.utc_now import utc_now
 
 
 def clean_event_name(name: Optional[str]) -> Optional[str]:

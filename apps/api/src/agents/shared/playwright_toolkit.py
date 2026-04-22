@@ -13,7 +13,7 @@ Usage:
 """
 
 import logging
-from typing import Optional, List, Any
+from typing import Any, List, Optional
 
 from langchain_community.agent_toolkits import PlayWrightBrowserToolkit
 from langchain_community.tools.playwright.utils import create_async_playwright_browser
@@ -41,16 +41,16 @@ async def create_playwright_tools(
             headless=headless,
             slow_mo=slow_mo
         )
-        
+
         # Create toolkit
         toolkit = PlayWrightBrowserToolkit.from_browser(async_browser=async_browser)
-        
+
         # Get all tools
         tools = toolkit.get_tools()
-        
+
         logger.info(f"Created {len(tools)} Playwright tools from toolkit: {[t.name for t in tools]}")
         return tools
-        
+
     except Exception as e:
         logger.error(f"Failed to create Playwright tools: {e}")
         logger.warning("Falling back to custom browser tools")
@@ -72,13 +72,13 @@ async def create_playwright_tools_with_existing_browser(
     try:
         # Create toolkit from existing browser
         toolkit = PlayWrightBrowserToolkit.from_browser(async_browser=async_browser)
-        
+
         # Get all tools
         tools = toolkit.get_tools()
-        
+
         logger.info(f"Created {len(tools)} Playwright tools from existing browser")
         return tools
-        
+
     except Exception as e:
         logger.error(f"Failed to create Playwright tools: {e}")
         raise

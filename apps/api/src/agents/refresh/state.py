@@ -1,10 +1,10 @@
 """State definition for Refresh Agent."""
 
-from typing import Annotated, Optional, Any, List
-from datetime import datetime
-from langgraph.graph.message import add_messages
+from typing import Annotated, List, Optional
+
 from langchain_core.messages import BaseMessage
-from pydantic import BaseModel, Field
+from langgraph.graph.message import add_messages
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class RefreshState(BaseModel):
@@ -63,5 +63,4 @@ class RefreshState(BaseModel):
     iteration: int = 0
     max_iterations: int = 10
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)

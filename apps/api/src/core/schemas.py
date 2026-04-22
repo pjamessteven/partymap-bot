@@ -1,13 +1,14 @@
 """Pydantic schemas for data validation."""
 
 from datetime import datetime
-from src.utils.utc_now import utc_now
 from decimal import Decimal
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, HttpUrl, field_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
+
+from src.utils.utc_now import utc_now
 
 
 class MediaItem(BaseModel):
@@ -170,20 +171,20 @@ class FestivalData(BaseModel):
         errors = []
         warnings = []
         missing_fields = []
-        
+
         # Required field checks
         if not self.name or len(self.name.strip()) < 2:
             errors.append({"field": "name", "message": "Name is required and must be at least 2 characters"})
             missing_fields.append("name")
-        
+
         if not self.description or len(self.description.strip()) < 10:
             errors.append({"field": "description", "message": "Description must be at least 10 characters"})
             missing_fields.append("description")
-            
+
         if not self.full_description or len(self.full_description.strip()) < 20:
             errors.append({"field": "full_description", "message": "Full description must be at least 20 characters"})
             missing_fields.append("full_description")
-        
+
         # Event dates validation
         if not self.event_dates:
             errors.append({"field": "event_dates", "message": "At least one event date is required"})
@@ -196,7 +197,7 @@ class FestivalData(BaseModel):
                         "field": f"event_dates[{idx}].end",
                         "message": "End date must be after start date"
                     })
-                
+
                 # Check dates are in the future
                 from datetime import datetime
                 if ed.start and ed.start < datetime.now():
@@ -204,7 +205,7 @@ class FestivalData(BaseModel):
                         "field": f"event_dates[{idx}].start",
                         "message": "Event date is in the past"
                     })
-                
+
                 # Check location
                 if not ed.location_description or len(ed.location_description.strip()) < 3:
                     errors.append({
@@ -213,7 +214,7 @@ class FestivalData(BaseModel):
                     })
                     if "location" not in missing_fields:
                         missing_fields.append("location")
-                
+
                 # Ticket price validation
                 if ed.tickets:
                     for t_idx, ticket in enumerate(ed.tickets):
@@ -223,29 +224,29 @@ class FestivalData(BaseModel):
                                     "field": f"event_dates[{idx}].tickets[{t_idx}].price_max",
                                     "message": "Maximum price must be greater than or equal to minimum price"
                                 })
-        
+
         # Media validation
         if not self.logo_url:
             warnings.append({"field": "logo_url", "message": "No logo image selected"})
-        
+
         if not self.media_items:
             warnings.append({"field": "media_items", "message": "No gallery images"})
-        
+
         # Tags validation
         if not self.tags:
             warnings.append({"field": "tags", "message": "No tags assigned"})
         elif len(self.tags) < 2:
             warnings.append({"field": "tags", "message": "Consider adding more tags for better discoverability"})
-        
+
         # Calculate completeness score
         required_fields = ["name", "description", "full_description", "event_dates"]
         optional_fields = ["logo_url", "media_items", "tags", "youtube_url", "website_url"]
-        
+
         required_score = sum(1 for f in required_fields if f not in missing_fields) / len(required_fields)
         optional_score = sum(1 for f in optional_fields if getattr(self, f, None)) / len(optional_fields)
-        
+
         completeness_score = (required_score * 0.7) + (optional_score * 0.3)
-        
+
         # Determine status
         if errors:
             status = "invalid"
@@ -253,7 +254,7 @@ class FestivalData(BaseModel):
             status = "needs_review"
         else:
             status = "ready"
-        
+
         return ValidationResult(
             is_valid=(status == "ready"),
             status=status,
@@ -274,23 +275,22 @@ class DiscoveredFestival(BaseModel):
     source_id: Optional[str] = None
     source_url: Optional[str] = None
     location: Optional[str] = None  # Location from discovery
-    
+
     # State and workflow
     state: FestivalState = FestivalState.DISCOVERED
     workflow_type: Optional[str] = None  # "new" or "update"
-    
+
     # Deduplication info (NEW: integrated deduplication)
     partymap_event_id: Optional[int] = None  # Integer to match PartyMap API
     update_required: bool = False
     update_reasons: List[str] = Field(default_factory=list)
     existing_event_data: Optional[dict] = None
-    
+
     discovered_data: dict = Field(default_factory=dict)
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ResearchedFestival(BaseModel):
@@ -318,8 +318,7 @@ class ResearchedFestival(BaseModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # PartyMap API Schemas
@@ -462,8 +461,7 @@ class SystemSettingResponse(BaseModel):
     created_at: datetime = Field(..., description="When the setting was created")
     updated_at: datetime = Field(..., description="When the setting was last updated")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SystemSettingUpdate(BaseModel):
@@ -549,9 +547,9 @@ class FestivalPendingAction(BaseModel):
     created_at: datetime = Field(..., description="When the festival was discovered")
     retry_count: int = Field(0, description="Number of retry attempts")
     last_error: Optional[str] = Field(None, description="Last error if failed")
+    partymap_event_id: Optional[str] = Field(None, description="PartyMap event ID if already synced")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class FestivalActionRequest(BaseModel):
@@ -613,7 +611,7 @@ class DeduplicationResultResponse(BaseModel):
 
 class ResearchFailure(BaseModel):
     """Structured failure information from research agent."""
-    
+
     reason: str = Field(
         ...,
         description="Failure reason category",
@@ -646,28 +644,27 @@ class ResearchFailure(BaseModel):
         default=0,
         description="Number of research iterations attempted"
     )
-    
-    class Config:
-        from_attributes = True
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ResearchResult(BaseModel):
     """Structured result from research agent."""
-    
+
     success: bool = Field(..., description="Whether research was successful")
-    
+
     # For successful research
     festival_data: Optional[FestivalData] = Field(
         None,
         description="Complete festival data for successful research"
     )
-    
+
     # For failed research
     failure: Optional[ResearchFailure] = Field(
         None,
         description="Failure information for unsuccessful research"
     )
-    
+
     collected_data: Dict[str, Any] = Field(
         default_factory=dict,
         description="All data collected during research"
@@ -684,14 +681,13 @@ class ResearchResult(BaseModel):
         default_factory=list,
         description="Agent decisions during research"
     )
-    
-    class Config:
-        from_attributes = True
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SchemaValidationResult(BaseModel):
     """Result of PartyMap schema validation."""
-    
+
     is_valid: bool = Field(..., description="Whether data meets schema requirements")
     missing_fields: List[str] = Field(
         default_factory=list,

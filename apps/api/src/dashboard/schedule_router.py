@@ -2,22 +2,20 @@
 
 import logging
 from datetime import datetime, timedelta
-from src.utils.utc_now import utc_now
 from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.config import get_settings
 from src.core.database import get_db
 from src.core.models import PipelineSchedule
-from src.tasks.celery_app import celery_app
-from src.tasks.pipeline import discovery_pipeline, research_pipeline, sync_pipeline
 from src.tasks.goabase_sync import goabase_sync_pipeline
 from src.tasks.maintenance import cleanup_failed
+from src.tasks.pipeline import discovery_pipeline
+from src.utils.utc_now import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -49,8 +47,7 @@ class ScheduleConfig(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ScheduleUpdate(BaseModel):

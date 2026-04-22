@@ -3,14 +3,14 @@
 import logging
 from typing import Dict, List, Optional
 
+from src.agents.deduplication import DeduplicationAgent
 from src.config import Settings
 from src.core.database import AsyncSessionLocal
-from src.core.models import DiscoveryQuery, Festival, FestivalState
+from src.core.models import DiscoveryQuery, FestivalState
 from src.core.schemas import DiscoveredFestival
+from src.partymap.client import PartyMapClient
 from src.services.exa_client import ExaClient
 from src.services.llm_client import LLMClient
-from src.partymap.client import PartyMapClient
-from src.agents.deduplication import DeduplicationAgent
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +93,7 @@ class DiscoveryAgent:
             if "goabase" in query.lower() or "psytrance" in query.lower():
                 logger.info(f"Skipping goabase query (handled by separate sync): {query}")
                 continue
-                
+
             festivals = await self._search_exa(query)
             all_festivals.extend(festivals)
 
@@ -114,7 +114,7 @@ class DiscoveryAgent:
         return all_festivals
 
     async def discover_with_deduplication(
-        self, 
+        self,
         manual_query: Optional[str] = None,
         enable_deduplication: bool = True
     ) -> List[DiscoveredFestival]:
@@ -133,7 +133,7 @@ class DiscoveryAgent:
         """
         # Step 1: Standard discovery
         festivals = await self.discover(manual_query)
-        
+
         if not enable_deduplication:
             logger.info("Deduplication disabled, skipping PartyMap checks")
             # Mark all as new
@@ -141,16 +141,16 @@ class DiscoveryAgent:
                 festival.state = FestivalState.NEEDS_RESEARCH_NEW
                 festival.workflow_type = "new"
             return festivals
-        
+
         # Step 2: Initialize deduplication agent
         llm = LLMClient(self.settings)
         partymap = PartyMapClient(self.settings)
         dedup_agent = DeduplicationAgent(self.settings, llm, partymap)
-        
+
         try:
             # Step 3: Check each festival for duplicates
             logger.info(f"Checking {len(festivals)} festivals for PartyMap duplicates...")
-            
+
             for idx, festival in enumerate(festivals):
                 try:
                     # Check for duplicate
@@ -161,7 +161,7 @@ class DiscoveryAgent:
                         discovered_description=festival.raw_data.get("description") if festival.raw_data else None,
                         clean_name=festival.clean_name
                     )
-                    
+
                     # Set metadata based on deduplication result
                     if result.is_duplicate and result.confidence > 0.7:
                         # This is a duplicate - mark for update
@@ -171,7 +171,7 @@ class DiscoveryAgent:
                         festival.update_required = True
                         festival.update_reasons = result.update_reasons
                         festival.existing_event_data = result.event_data
-                        
+
                         self._log_decision(
                             thought=f"Festival '{festival.name}' is duplicate of PartyMap event {result.event_id}",
                             action="mark_for_update",
@@ -179,14 +179,14 @@ class DiscoveryAgent:
                             next_step="queue_for_update_research",
                             confidence=result.confidence
                         )
-                        
+
                         logger.info(f"Duplicate found: {festival.name} -> Event {result.event_id} "
                                    f"(update reasons: {result.update_reasons})")
                     else:
                         # This is new - mark for full research
                         festival.state = FestivalState.NEEDS_RESEARCH_NEW
                         festival.workflow_type = "new"
-                        
+
                         self._log_decision(
                             thought=f"Festival '{festival.name}' is new (not in PartyMap)",
                             action="mark_for_new_research",
@@ -194,27 +194,27 @@ class DiscoveryAgent:
                             next_step="queue_for_full_research",
                             confidence=1.0
                         )
-                        
+
                         logger.info(f"New festival: {festival.name}")
-                    
+
                     # Track deduplication cost (~$0.05 per check)
                     self.cost_cents += 5
-                    
+
                 except Exception as e:
                     logger.error(f"Deduplication check failed for {festival.name}: {e}")
                     # Default to new research on error
                     festival.state = FestivalState.NEEDS_RESEARCH_NEW
                     festival.workflow_type = "new"
-            
+
             # Summary
             new_count = sum(1 for f in festivals if f.workflow_type == "new")
             update_count = sum(1 for f in festivals if f.workflow_type == "update")
             logger.info(f"Deduplication complete: {new_count} new, {update_count} updates")
-            
+
         finally:
             await llm.close()
             await partymap.close()
-        
+
         return festivals
 
     async def _get_next_queries(self) -> List[str]:
@@ -382,5 +382,4 @@ class DiscoveryAgent:
         )
 
 
-from datetime import datetime
 from src.utils.utc_now import utc_now

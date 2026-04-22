@@ -2,15 +2,14 @@
 
 import logging
 from datetime import datetime, timedelta
-from src.utils.utc_now import utc_now
 from typing import Dict, Optional
 
-from celery import current_app
 from celery.beat import ScheduleEntry, Scheduler
 from celery.schedules import crontab
 
 from src.core.database import SessionLocal
 from src.core.models import PipelineSchedule
+from src.utils.utc_now import utc_now
 
 logger = logging.getLogger(__name__)
 

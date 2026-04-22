@@ -43,13 +43,20 @@ celery_app.conf.update(
 )
 
 # Import tasks to register them
+from src.tasks.goabase_sync import goabase_sync_pipeline
 from src.tasks.pipeline import (
     deduplication_check,
     discovery_pipeline,
     research_pipeline,
     sync_pipeline,
 )
-from src.tasks.goabase_sync import goabase_sync_pipeline
+
+
+# Configure structured logging when Celery workers start
+@celery_app.on_after_configure.connect
+def setup_structlog(sender, **kwargs):
+    from src.utils.logging import configure_logging
+    configure_logging()
 
 __all__ = [
     "celery_app",

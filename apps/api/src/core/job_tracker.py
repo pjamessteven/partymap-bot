@@ -2,13 +2,12 @@
 
 import json
 import logging
-from datetime import datetime
-from src.utils.utc_now import utc_now
 from enum import Enum
-from typing import Dict, Optional, List
+from typing import Dict, List, Optional
 
 from src.core.database import get_redis_client
 from src.core.job_activity import JobActivityLogger
+from src.utils.utc_now import utc_now
 
 logger = logging.getLogger(__name__)
 

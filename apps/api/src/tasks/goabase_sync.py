@@ -4,7 +4,7 @@ import asyncio
 import logging
 import time
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 
 from celery import Celery
 from sqlalchemy import select
@@ -13,7 +13,7 @@ from src.config import get_settings
 from src.core.database import SessionLocal
 from src.core.job_tracker import JobTracker, JobType
 from src.core.models import Festival, FestivalState
-from src.core.schemas import DuplicateCheckResult, EventDateData, FestivalData
+from src.core.schemas import DuplicateCheckResult, FestivalData
 from src.partymap.client import PartyMapClient
 from src.services.goabase_client import GoabaseClient
 from src.services.llm_client import LLMClient

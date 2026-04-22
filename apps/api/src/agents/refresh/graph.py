@@ -1,10 +1,10 @@
 """Refresh agent graph definition."""
 
-from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import END, START, StateGraph
 
+from src.agents.refresh.nodes import evaluate_node, research_node, search_node
 from src.agents.refresh.state import RefreshState
-from src.agents.refresh.nodes import search_node, research_node, evaluate_node
 
 
 def create_refresh_graph(checkpointer=None):

@@ -1,29 +1,27 @@
 """Celery tasks for festival discovery pipeline."""
 
 import logging
-from datetime import datetime, timedelta
-from src.utils.utc_now import utc_now
+from datetime import timedelta
 from uuid import UUID
 
 from celery import Celery
 from sqlalchemy import func, select
 
+from src.agents.discovery import DiscoveryAgent
 from src.config import get_settings
-from src.core.database import SessionLocal, sync_engine
+from src.core.database import SessionLocal
 from src.core.models import (
     AgentDecision,
-    Base,
     CostLog,
-    DiscoveryQuery,
     Festival,
     FestivalEventDate,
     FestivalState,
     StateTransition,
 )
-from src.core.schemas import DiscoveredFestival, EventDateData, ResearchResult, ResearchFailure
-from src.agents.discovery import DiscoveryAgent
-from src.partymap.client import PartyMapClient
+from src.core.schemas import ResearchFailure, ResearchResult
 from src.dashboard.settings_router import is_setting_enabled_sync
+from src.partymap.client import PartyMapClient
+from src.utils.utc_now import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -334,10 +332,10 @@ def research_pipeline(self, festival_id: str):
         if festival.state == FestivalState.RESEARCHED:
             if festival.updated_at and festival.updated_at > utc_now() - timedelta(days=7):
                 logger.info(f"Recently researched, skipping: {festival.name}")
-                
+
                 # Only auto-sync if auto_sync_on_research_success setting is enabled
                 from src.dashboard.settings_router import is_setting_enabled_sync
-                
+
                 if is_setting_enabled_sync(session, "auto_sync_on_research_success"):
                     sync_pipeline.delay(festival_id)
                     logger.info(f"Auto-sync queued for recently researched festival: {festival.name}")
@@ -363,28 +361,27 @@ def research_pipeline(self, festival_id: str):
             """Run research using LangGraph agent."""
             from src.agents.research.graph import get_research_graph
             from src.agents.research.state import ResearchState
-            from src.services.browser_service import BrowserService
-            from src.services.llm_client import LLMClient
-            from src.services.exa_client import ExaClient
-            from src.services.musicbrainz_client import MusicBrainzClient
-            from src.agents.research.cost_tracker import CostTracker
-            
+
             # Get budget from settings
             from src.dashboard.settings_router import get_setting_value_sync
+            from src.services.browser_service import BrowserService
+            from src.services.exa_client import ExaClient
+            from src.services.llm_client import LLMClient
+            from src.services.musicbrainz_client import MusicBrainzClient
             budget_cents = get_setting_value_sync(session, "research_budget_cents", default=50)
-            
+
             # Initialize services
             browser = BrowserService(settings)
             llm = LLMClient(settings)
             exa = ExaClient(settings)
             musicbrainz = MusicBrainzClient(settings)
-            
+
             try:
                 await browser.start()
-                
+
                 # Create graph
                 graph = get_research_graph()
-                
+
                 # Create initial state
                 thread_id = f"research_pipeline_{festival_id}"
                 initial_state = ResearchState(
@@ -393,7 +390,7 @@ def research_pipeline(self, festival_id: str):
                     discovered_data=festival.discovered_data,
                     budget_cents=budget_cents,
                 )
-                
+
                 # Run graph
                 config = {
                     "configurable": {"thread_id": thread_id},
@@ -403,21 +400,21 @@ def research_pipeline(self, festival_id: str):
                     "musicbrainz": musicbrainz,
                     "settings": settings,
                 }
-                
+
                 result_state = await graph.ainvoke(initial_state, config=config)
-                
+
                 # Convert result state to ResearchResult
                 final_result = result_state.get("final_result")
                 cost_tracker_data = result_state.get("cost_tracker", {})
                 total_cost = result_state.get("total_cost_cents", 0)
                 budget_exceeded = result_state.get("budget_exceeded", False)
                 error = result_state.get("error")
-                
+
                 if final_result:
                     # Successful research
                     from src.core.schemas import FestivalData
                     festival_data = FestivalData(**final_result)
-                    
+
                     return ResearchResult(
                         success=True,
                         festival_data=festival_data,
@@ -455,7 +452,7 @@ def research_pipeline(self, festival_id: str):
                         cost_cents=total_cost,
                         iterations=result_state.get("iteration", 0),
                     )
-                    
+
             finally:
                 await browser.close()
                 await llm.close()
@@ -463,12 +460,12 @@ def research_pipeline(self, festival_id: str):
                 await musicbrainz.close()
 
         result = asyncio.run(_research_async())
-        
+
         # Handle research result
         if result.success and result.festival_data:
             # Successful research with complete data
             festival_data = result.festival_data
-            
+
             # Save structured research result
             festival.research_data = result.model_dump()
             festival.research_cost_cents = result.cost_cents
@@ -523,24 +520,24 @@ def research_pipeline(self, festival_id: str):
 
             # Queue for sync only if auto_sync_on_research_success is enabled
             from src.dashboard.settings_router import is_setting_enabled_sync
-            
+
             if is_setting_enabled_sync(session, "auto_sync_on_research_success"):
                 sync_pipeline.delay(festival_id)
                 logger.info(f"Auto-sync queued for researched festival: {festival.name}")
             else:
                 logger.info(f"Auto-sync disabled, festival ready for manual sync: {festival.name}")
-            
+
         elif result.failure:
             # Research failed with structured failure
             failure = result.failure
-            
+
             # Save structured failure result
             festival.research_data = result.model_dump()
             festival.research_cost_cents = result.cost_cents
             festival.failure_reason = failure.reason
             festival.failure_message = failure.message
             festival.research_completeness_score = failure.completeness_score
-            
+
             # Determine state based on completeness
             if failure.completeness_score > 0:
                 festival.state = FestivalState.RESEARCHED_PARTIAL
@@ -549,7 +546,7 @@ def research_pipeline(self, festival_id: str):
                 festival.state = FestivalState.FAILED
                 state_msg = f"Research failed: {failure.message}"
                 festival.retry_count += 1
-                
+
                 # Check max retries
                 if festival.retry_count >= settings.max_retries:
                     festival.purge_after = utc_now() + timedelta(
@@ -579,7 +576,7 @@ def research_pipeline(self, festival_id: str):
             )
 
             session.commit()
-            
+
         else:
             # Unexpected result format
             logger.error(f"Unexpected research result format for {festival_id}")
@@ -592,7 +589,7 @@ def research_pipeline(self, festival_id: str):
     except Exception as e:
         session.rollback()
         logger.error(f"Unexpected error researching {festival_id}: {e}")
-        
+
         # Update festival with failure information
         festival.state = FestivalState.FAILED
         festival.last_error = str(e)
@@ -600,13 +597,13 @@ def research_pipeline(self, festival_id: str):
         festival.failure_message = f"Unexpected error: {str(e)}"
         festival.research_completeness_score = 0.0
         festival.retry_count += 1
-        
+
         # Check max retries
         if festival.retry_count >= settings.max_retries:
             festival.purge_after = utc_now() + timedelta(
                 days=settings.failed_festival_retention_days
             )
-        
+
         session.commit()
         raise self.retry(exc=e, countdown=60)
 
@@ -642,10 +639,9 @@ def sync_pipeline(self, festival_id: str):
             return
 
         # --- Pre-flight Validation ---
-        from src.core.schemas import FestivalData, DuplicateCheckResult
+        from src.core.error_classification import ErrorCategory, ErrorContext, categorize_error
+        from src.core.schemas import DuplicateCheckResult, FestivalData
         from src.core.validators import PartyMapSyncValidator
-        from src.core.error_classification import ErrorContext, ErrorCategory, categorize_error
-        from src.services.dead_letter_queue import check_and_quarantine
 
         festival_data = FestivalData(**festival.research_data)
         validator = PartyMapSyncValidator()

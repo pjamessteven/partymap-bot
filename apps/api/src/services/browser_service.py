@@ -2,7 +2,9 @@
 
 import logging
 from typing import List, Optional
-from playwright.async_api import async_playwright, Page, Browser as PlaywrightBrowser
+
+from playwright.async_api import Browser as PlaywrightBrowser
+from playwright.async_api import Page, async_playwright
 
 from src.config import Settings
 

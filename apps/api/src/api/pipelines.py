@@ -1,7 +1,8 @@
 """API routes for pipeline control - manual start/stop of all services."""
 
+from typing import Any, Dict
+
 from fastapi import APIRouter, HTTPException
-from typing import Dict, Any
 
 from src.pipeline_control import pipeline_manager
 
@@ -41,7 +42,7 @@ async def get_pipeline_status(pipeline_key: str) -> Dict[str, Any]:
     status = pipeline_manager.get_status(pipeline_key)
     if not status:
         raise HTTPException(status_code=404, detail=f"Pipeline not found: {pipeline_key}")
-    
+
     return {
         "status": "success",
         "pipeline": status
@@ -61,13 +62,13 @@ async def start_pipeline(pipeline_key: str) -> Dict[str, str]:
     - deduplication: Check PartyMap for duplicates
     """
     valid_pipelines = ["discovery", "goabase_sync", "research", "sync", "deduplication"]
-    
+
     if pipeline_key not in valid_pipelines:
         raise HTTPException(
             status_code=400,
             detail=f"Invalid pipeline. Valid options: {', '.join(valid_pipelines)}"
         )
-    
+
     result = await pipeline_manager.start_pipeline(pipeline_key)
     return result
 
@@ -81,13 +82,13 @@ async def stop_pipeline(pipeline_key: str) -> Dict[str, str]:
     May take a few moments to complete current work.
     """
     valid_pipelines = ["discovery", "goabase_sync", "research", "sync", "deduplication"]
-    
+
     if pipeline_key not in valid_pipelines:
         raise HTTPException(
             status_code=400,
             detail=f"Invalid pipeline. Valid options: {', '.join(valid_pipelines)}"
         )
-    
+
     result = await pipeline_manager.stop_pipeline(pipeline_key)
     return result
 
@@ -105,7 +106,7 @@ async def stop_all_pipelines() -> Dict[str, Any]:
         if status and status["status"] == "running":
             result = await pipeline_manager.stop_pipeline(key)
             results[key] = result
-    
+
     return {
         "status": "success",
         "message": "Stop signals sent to all running pipelines",

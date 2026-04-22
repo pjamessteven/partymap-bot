@@ -95,11 +95,11 @@ class ExaBrowserSource(SourceInterface):
         # Use LangGraph research agent
         from src.agents.research.graph import get_research_graph
         from src.agents.research.state import ResearchState
-        from src.services.browser_service import BrowserService
-        from src.services.llm_client import LLMClient
-        from src.services.exa_client import ExaClient
-        from src.services.musicbrainz_client import MusicBrainzClient
         from src.partymap.client import PartyMapClient
+        from src.services.browser_service import BrowserService
+        from src.services.exa_client import ExaClient
+        from src.services.llm_client import LLMClient
+        from src.services.musicbrainz_client import MusicBrainzClient
 
         # Initialize services
         browser = BrowserService(self.settings)

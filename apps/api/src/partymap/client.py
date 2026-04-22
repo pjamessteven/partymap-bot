@@ -2,9 +2,7 @@
 
 import logging
 from datetime import datetime
-from src.utils.utc_now import utc_now
-from typing import Any, Dict, List, Optional
-from uuid import UUID
+from typing import List, Optional
 
 import httpx
 from tenacity import (
@@ -21,6 +19,7 @@ from src.core.schemas import (
     FestivalData,
 )
 from src.services.circuit_breaker import circuit_breaker
+from src.utils.utc_now import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +68,7 @@ class PartyMapClient:
         import asyncio
 
         if self._last_request_time:
-            min_interval = 0.5  
+            min_interval = 0.5
             elapsed = (utc_now() - self._last_request_time).total_seconds()
             if elapsed < min_interval:
                 await asyncio.sleep(min_interval - elapsed)
@@ -850,7 +849,7 @@ class PartyMapClient:
         :param offset: Pagination offset
         :return: List of EventDate objects with parent Event info
         """
-        from datetime import datetime, timedelta
+        from datetime import timedelta
 
         start_after = utc_now().isoformat()
         start_before = (utc_now() + timedelta(days=days_ahead)).isoformat()
@@ -956,14 +955,14 @@ class PartyMapClient:
             event = await self.get_event(event_id)
             if not event:
                 return []
-            
+
             event_dates = event.get("event_dates", [])
             from datetime import datetime
-            
+
             # Filter for future dates (or dates without end in past)
             future_dates = []
             now = utc_now()
-            
+
             for date in event_dates:
                 start = date.get("start")
                 if start:
@@ -977,17 +976,17 @@ class PartyMapClient:
                 else:
                     # No start date, include for review
                     future_dates.append(date)
-            
+
             return future_dates
-            
+
         except Exception as e:
             logger.error(f"Failed to get next event dates for {event_id}: {e}")
             return []
 
     async def update_event_partial(
-        self, 
-        event_id: int, 
-        updates: dict, 
+        self,
+        event_id: int,
+        updates: dict,
         update_reasons: List[str],
         message: str = "Updated via Festival Bot"
     ) -> bool:
@@ -1006,14 +1005,14 @@ class PartyMapClient:
             payload = {
                 "message": f"{message} (reasons: {', '.join(update_reasons)})",
             }
-            
+
             # Add all provided updates
             payload.update(updates)
-            
+
             await self._request("PUT", f"/api/event/{event_id}", json=payload)
             logger.info(f"Updated PartyMap event {event_id} (reasons: {update_reasons})")
             return True
-            
+
         except PartyMapAPIError as e:
             logger.error(f"Failed to update event {event_id}: {e}")
             return False
@@ -1043,11 +1042,11 @@ class PartyMapClient:
                 "location": {"description": event_date.location_description},
                 "message": message,
             }
-            
+
             # Add optional fields
             if event_date.lineup:
                 payload["artists"] = [{"name": name} for name in event_date.lineup]
-            
+
             if event_date.tickets:
                 payload["tickets"] = [
                     {
@@ -1059,24 +1058,24 @@ class PartyMapClient:
                     }
                     for ticket in event_date.tickets
                 ]
-            
+
             size = getattr(event_date, 'size', None) or getattr(event_date, 'expected_size', None)
             if size:
                 payload["size"] = size
-            
+
             response = await self._request(
-                "POST", 
-                f"/api/date/event/{event_id}", 
+                "POST",
+                f"/api/date/event/{event_id}",
                 json=payload
             )
-            
+
             # Extract event_date_id from response
             result = response.json()
             event_date_id = result.get("id")
-            
+
             logger.info(f"Added new EventDate {event_date_id} to event {event_id}")
             return event_date_id
-            
+
         except PartyMapAPIError as e:
             logger.error(f"Failed to add event date to {event_id}: {e}")
             return None

@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from src.core.schemas import EventDateData, MediaItem, ResearchedFestival, TicketInfo, FestivalData
+from src.core.schemas import EventDateData, ResearchedFestival, TicketInfo
 
 
 class FestivalMapper:

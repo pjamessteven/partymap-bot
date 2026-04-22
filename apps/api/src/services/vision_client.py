@@ -25,7 +25,7 @@ class VisionClient:
     vision capabilities. It downloads images and sends them to GPT-4o-mini
     for text description.
     """
-    
+
     def __init__(self, settings: Settings):
         self.settings = settings
         # Use OpenAI for vision (GPT-4o-mini)
@@ -37,13 +37,13 @@ class VisionClient:
             )
         else:
             self.client = AsyncOpenAI(api_key=settings.openai_api_key)
-        
+
         self.model = "gpt-4o-mini"  # Vision-capable, cost-effective
         logger.info(f"VisionClient initialized with model: {self.model}")
-    
+
     async def describe_image(
-        self, 
-        image_url: str, 
+        self,
+        image_url: str,
         context: Optional[str] = None,
         max_tokens: int = 1000
     ) -> str:
@@ -64,13 +64,13 @@ class VisionClient:
             if not image_base64:
                 logger.error(f"Failed to download image: {image_url}")
                 return ""
-            
+
             # Prepare prompt
             if context:
                 prompt = f"Describe this {context} in detail. List all text, names, and important visual elements you can see."
             else:
                 prompt = "Describe this image in detail. List all text and important visual elements you can see."
-            
+
             # Call vision model
             response = await self.client.chat.completions.create(
                 model=self.model,
@@ -90,17 +90,17 @@ class VisionClient:
                 ],
                 max_tokens=max_tokens
             )
-            
+
             description = response.choices[0].message.content
             logger.debug(f"Image description ({len(description)} chars): {description[:100]}...")
             return description
-            
+
         except Exception as e:
             logger.error(f"Vision description failed: {e}")
             return ""
-    
+
     async def describe_lineup_image(
-        self, 
+        self,
         image_url: str,
         festival_context: Optional[str] = None
     ) -> str:
@@ -121,19 +121,19 @@ class VisionClient:
             "3. Include any stage names or scheduling info if visible",
             "4. Mention the visual style/design if relevant"
         ]
-        
+
         if festival_context:
             prompt_parts.append(f"\nFestival context: {festival_context}")
-        
+
         prompt = "\n".join(prompt_parts)
-        
+
         try:
             # Download image
             image_base64 = await self._download_image(image_url)
             if not image_base64:
                 logger.error(f"Failed to download lineup image: {image_url}")
                 return ""
-            
+
             # Call vision model
             response = await self.client.chat.completions.create(
                 model=self.model,
@@ -153,15 +153,15 @@ class VisionClient:
                 ],
                 max_tokens=1500  # More tokens for lineup lists
             )
-            
+
             description = response.choices[0].message.content
             logger.info(f"Described lineup image: {len(description)} characters, {description.count(chr(10))} lines")
             return description
-            
+
         except Exception as e:
             logger.error(f"Lineup image description failed: {e}")
             return ""
-    
+
     async def _download_image(self, image_url: str) -> Optional[str]:
         """
         Download image and convert to base64.
@@ -176,24 +176,24 @@ class VisionClient:
             async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
                 response = await client.get(image_url)
                 response.raise_for_status()
-                
+
                 # Check content type
                 content_type = response.headers.get("content-type", "")
                 if not content_type.startswith("image/"):
                     logger.warning(f"URL is not an image: {content_type}")
                     return None
-                
+
                 # Convert to base64
                 image_bytes = response.content
                 image_base64 = base64.b64encode(image_bytes).decode('utf-8')
-                
+
                 logger.debug(f"Downloaded image: {len(image_bytes)} bytes")
                 return image_base64
-                
+
         except Exception as e:
             logger.error(f"Failed to download image: {e}")
             return None
-    
+
     async def close(self):
         """Cleanup resources."""
         await self.client.close()

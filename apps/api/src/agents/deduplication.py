@@ -6,12 +6,12 @@ discovered festivals with existing PartyMap events.
 
 import json
 import logging
-from typing import List, NamedTuple, Optional
 from dataclasses import dataclass
+from typing import List, Optional
 
 from src.config import Settings
-from src.services.llm_client import LLMClient
 from src.partymap.client import PartyMapClient
+from src.services.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ class DeduplicationResult:
     event_data: Optional[dict] = None
     update_reasons: List[str] = None
     reasoning: str = ""
-    
+
     def __post_init__(self):
         if self.update_reasons is None:
             self.update_reasons = []
@@ -39,7 +39,7 @@ class DeduplicationAgent:
     1. Search PartyMap for potential matches
     2. Use LLM to determine if it's a duplicate and what needs updating
     """
-    
+
     UPDATE_REASONS = [
         "missing_dates",      # No future dates in PartyMap
         "dates_unconfirmed",  # Dates exist but not confirmed
@@ -50,12 +50,12 @@ class DeduplicationAgent:
         "media_update",       # New images/media available
         "url_update",         # Website URL changed
     ]
-    
+
     def __init__(self, settings: Settings, llm: LLMClient, partymap: PartyMapClient):
         self.settings = settings
         self.llm = llm
         self.partymap = partymap
-    
+
     async def check_duplicate(
         self,
         discovered_name: str,
@@ -77,7 +77,7 @@ class DeduplicationAgent:
         # Stage 1: Search PartyMap for potential matches
         search_query = clean_name if clean_name else discovered_name
         potential_matches = await self.partymap.search_events(search_query, limit=10)
-        
+
         if not potential_matches:
             logger.info(f"No potential matches found for: {discovered_name}")
             return DeduplicationResult(
@@ -85,11 +85,11 @@ class DeduplicationAgent:
                 confidence=1.0,
                 reasoning="No events found with similar name"
             )
-        
+
         # Stage 2: Use LLM to evaluate each potential match
         best_match = None
         best_confidence = 0.0
-        
+
         for event in potential_matches:
             result = await self._evaluate_match_with_llm(
                 discovered_name=discovered_name,
@@ -98,25 +98,25 @@ class DeduplicationAgent:
                 discovered_description=discovered_description,
                 existing_event=event
             )
-            
+
             if result.is_duplicate and result.confidence > best_confidence:
                 best_match = result
                 best_confidence = result.confidence
                 best_match.event_data = event
                 best_match.event_id = event.get("id")
-        
+
         if best_match:
             logger.info(f"Found duplicate: {discovered_name} -> Event ID {best_match.event_id} "
                        f"(confidence: {best_match.confidence:.2f}, reasons: {best_match.update_reasons})")
             return best_match
-        
+
         logger.info(f"No duplicate found for: {discovered_name}")
         return DeduplicationResult(
             is_duplicate=False,
             confidence=1.0,
             reasoning="LLM determined no matches are duplicates"
         )
-    
+
     async def _evaluate_match_with_llm(
         self,
         discovered_name: str,
@@ -133,18 +133,18 @@ class DeduplicationAgent:
         # Extract existing event info
         existing_name = existing_event.get("name", "")
         existing_location = existing_event.get("location", {}).get("description", "")
-        
+
         # Get next dates info
         next_dates = existing_event.get("next_date", {})
         existing_dates = ""
         date_confirmed = True
-        
+
         if next_dates:
             start = next_dates.get("start", "")
             end = next_dates.get("end", "")
             existing_dates = f"{start} to {end}" if end else start
             date_confirmed = next_dates.get("confirmed", True)
-        
+
         # Build prompt
         prompt = f"""Compare this discovered festival with an existing PartyMap event and determine if they are the same festival.
 
@@ -180,7 +180,7 @@ Return ONLY a JSON object in this format:
     "update_reasons": ["missing_dates", "description_update"],
     "reasoning": "Brief explanation of your decision"
 }}"""
-        
+
         try:
             response = await self.llm.chat_completion(
                 messages=[
@@ -196,16 +196,16 @@ Return ONLY a JSON object in this format:
                 response_format={"type": "json_object"},
                 temperature=0.1  # Low temperature for consistent results
             )
-            
+
             result_data = json.loads(response)
-            
+
             return DeduplicationResult(
                 is_duplicate=result_data.get("is_duplicate", False),
                 confidence=result_data.get("confidence", 0.0),
                 update_reasons=result_data.get("update_reasons", []),
                 reasoning=result_data.get("reasoning", "")
             )
-            
+
         except Exception as e:
             logger.error(f"LLM deduplication evaluation failed: {e}")
             # Default to not duplicate on error
@@ -214,7 +214,7 @@ Return ONLY a JSON object in this format:
                 confidence=0.0,
                 reasoning=f"Error during evaluation: {str(e)}"
             )
-    
+
     async def batch_check_duplicates(
         self,
         festivals: List[dict],
@@ -229,7 +229,7 @@ Return ONLY a JSON object in this format:
         """
         results = []
         total = len(festivals)
-        
+
         for idx, festival in enumerate(festivals):
             result = await self.check_duplicate(
                 discovered_name=festival.get("name", ""),
@@ -239,8 +239,8 @@ Return ONLY a JSON object in this format:
                 clean_name=festival.get("clean_name")
             )
             results.append(result)
-            
+
             if progress_callback:
                 await progress_callback(idx + 1, total)
-        
+
         return results

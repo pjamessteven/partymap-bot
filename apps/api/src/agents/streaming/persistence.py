@@ -3,14 +3,14 @@
 import json
 import uuid
 from typing import Any, Optional
-from datetime import datetime
-from src.utils.utc_now import utc_now
+
 from langchain_core.callbacks import AsyncCallbackHandler
-from langchain_core.messages import BaseMessage, AIMessageChunk, message_to_dict
+from langchain_core.messages import AIMessageChunk, message_to_dict
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.models import AgentThread, AgentStreamEvent
 from src.core.database import AsyncSessionLocal
+from src.core.models import AgentStreamEvent, AgentThread
+from src.utils.utc_now import utc_now
 
 
 class StreamPersistenceHandler(AsyncCallbackHandler):

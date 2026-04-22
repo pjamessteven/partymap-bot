@@ -15,14 +15,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.config import get_settings
 from src.core.database import get_db
 from src.core.models import SystemSettings
 from src.core.schemas import (
     AutoProcessSetting,
     SettingCategory,
-    SettingValueType,
     SettingsListResponse,
+    SettingValueType,
     SystemSettingResponse,
     SystemSettingUpdate,
 )
@@ -290,7 +289,7 @@ async def update_setting(
         )
 
     # Validate dependent settings logic
-    # Cannot enable auto_research_on_discover or auto_sync_on_research_success 
+    # Cannot enable auto_research_on_discover or auto_sync_on_research_success
     # when auto_process is disabled
     if key in ["auto_research_on_discover", "auto_sync_on_research_success"]:
         if update.value is True:  # Trying to enable
@@ -300,7 +299,7 @@ async def update_setting(
                     status_code=400,
                     detail=f"Cannot enable '{key}' because auto_process is disabled. Enable auto_process first.",
                 )
-    
+
     # When disabling auto_process, we should also disable dependent settings
     # But we'll warn instead of auto-disabling to be explicit
     if key == "auto_process" and update.value is False:
@@ -310,7 +309,7 @@ async def update_setting(
             dep_setting = await _get_setting_by_key(db, dep_key)
             if dep_setting and dep_setting.value.lower() == "true":
                 dependent_enabled.append(dep_key)
-        
+
         if dependent_enabled:
             # We'll allow it but warn in response
             # In practice, the auto-process enable/disable endpoints handle this properly
@@ -391,7 +390,7 @@ async def enable_auto_process(
         )
 
     setting.value = "true"
-    
+
     # Also enable dependent settings when master is enabled
     dependent_settings = ["auto_research_on_discover", "auto_sync_on_research_success"]
     for dep_key in dependent_settings:
@@ -399,7 +398,7 @@ async def enable_auto_process(
         if dep_setting and dep_setting.editable:
             dep_setting.value = "true"
             logger.info(f"Enabled dependent setting: {dep_key}")
-    
+
     await db.commit()
 
     logger.info("Auto-process enabled with dependent settings")
@@ -438,7 +437,7 @@ async def disable_auto_process(
         )
 
     setting.value = "false"
-    
+
     # Also disable dependent settings when master is disabled
     dependent_settings = ["auto_research_on_discover", "auto_sync_on_research_success"]
     for dep_key in dependent_settings:
@@ -446,7 +445,7 @@ async def disable_auto_process(
         if dep_setting and dep_setting.editable:
             dep_setting.value = "false"
             logger.info(f"Disabled dependent setting: {dep_key}")
-    
+
     await db.commit()
 
     logger.info("Auto-process disabled (manual mode) with dependent settings")
@@ -486,6 +485,7 @@ def is_auto_process_enabled_sync(session) -> bool:
         True if auto_process is enabled, False otherwise
     """
     from sqlalchemy import select
+
     from src.core.models import SystemSettings
 
     result = session.execute(select(SystemSettings).where(SystemSettings.key == "auto_process"))
@@ -510,6 +510,7 @@ def is_setting_enabled_sync(session, key: str) -> bool:
         True if setting is enabled (value is "true"), False otherwise
     """
     from sqlalchemy import select
+
     from src.core.models import SystemSettings
 
     result = session.execute(select(SystemSettings).where(SystemSettings.key == key))
@@ -525,5 +526,5 @@ def is_setting_enabled_sync(session, key: str) -> bool:
         auto_process_enabled = is_auto_process_enabled_sync(session)
         if not auto_process_enabled:
             return False
-    
+
     return setting.value.lower() == "true"

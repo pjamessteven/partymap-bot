@@ -7,20 +7,17 @@ This pipeline:
 4. Cancels events still unconfirmed 30 days out
 """
 
-import asyncio
 import logging
-from datetime import datetime, timedelta
-from src.utils.utc_now import utc_now
-from typing import Optional
+from datetime import datetime
 
 from celery import shared_task
-from sqlalchemy import select
 
 from src.config import get_settings
 from src.core.database import AsyncSessionLocal
-from src.core.job_tracker import JobTracker, JobType
 from src.core.job_activity import JobActivityLogger
-from src.core.models import RefreshApproval, SystemSettings
+from src.core.job_tracker import JobTracker, JobType
+from src.core.models import RefreshApproval
+from src.utils.utc_now import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -139,12 +136,12 @@ def refresh_festival_date_task(
 
     async def run():
         settings = get_settings()
-        from src.partymap.client import PartyMapClient
         from src.agents.refresh.graph import get_refresh_graph
-        from src.services.browser_service import BrowserService
-        from src.services.llm_client import LLMClient
-        from src.services.exa_client import ExaClient
         from src.agents.streaming import get_broadcaster
+        from src.partymap.client import PartyMapClient
+        from src.services.browser_service import BrowserService
+        from src.services.exa_client import ExaClient
+        from src.services.llm_client import LLMClient
 
         # Track job
         await JobTracker.start_job(
