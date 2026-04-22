@@ -15,6 +15,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { SkeletonCard } from '@/components/ui/skeleton'
+import { scheduleSchema } from '@/lib/validation'
 import { formatDate, formatRelativeTime } from '@/lib/utils'
 import { useState } from 'react'
 import { useToast } from '@/components/ui/toast-provider'
@@ -62,10 +64,7 @@ export default function SchedulePage() {
       queryClient.invalidateQueries({ queryKey: ['schedules'] })
       toastSuccess('Schedule enabled successfully')
     },
-    onError: (err: Error) => {
-      setPageError(err.message || 'Failed to enable schedule')
-      toastError('Failed to enable schedule')
-    },
+    onError: (err: Error) => setPageError(err.message || 'Failed to enable schedule'),
   })
 
   const disableMutation = useMutation({
@@ -74,10 +73,7 @@ export default function SchedulePage() {
       queryClient.invalidateQueries({ queryKey: ['schedules'] })
       toastSuccess('Schedule disabled successfully')
     },
-    onError: (err: Error) => {
-      setPageError(err.message || 'Failed to disable schedule')
-      toastError('Failed to disable schedule')
-    },
+    onError: (err: Error) => setPageError(err.message || 'Failed to disable schedule'),
   })
 
   const updateMutation = useMutation({
@@ -88,10 +84,7 @@ export default function SchedulePage() {
       setEditing(null)
       toastSuccess('Schedule updated successfully')
     },
-    onError: (err: Error) => {
-      setPageError(err.message || 'Failed to update schedule')
-      toastError('Failed to update schedule')
-    },
+    onError: (err: Error) => setPageError(err.message || 'Failed to update schedule'),
   })
 
   const applyMutation = useMutation({
@@ -100,10 +93,7 @@ export default function SchedulePage() {
       queryClient.invalidateQueries({ queryKey: ['schedules'] })
       toastSuccess('Schedule changes applied successfully')
     },
-    onError: (err: Error) => {
-      setPageError(err.message || 'Failed to apply schedule changes')
-      toastError('Failed to apply schedule changes')
-    },
+    onError: (err: Error) => setPageError(err.message || 'Failed to apply schedule changes'),
   })
 
   const runNowMutation = useMutation({
@@ -112,10 +102,7 @@ export default function SchedulePage() {
       queryClient.invalidateQueries({ queryKey: ['schedules'] })
       toastSuccess(`Task "${data.task_type}" started successfully`)
     },
-    onError: (err: Error) => {
-      setPageError(err.message || 'Failed to run task')
-      toastError('Failed to run task')
-    },
+    onError: (err: Error) => setPageError(err.message || 'Failed to run task'),
   })
 
   const startEditing = (schedule: NonNullable<typeof schedules>[number]) => {
@@ -127,7 +114,19 @@ export default function SchedulePage() {
     })
   }
 
+  const [editError, setEditError] = useState<string | null>(null)
+
   const saveEdit = (taskType: string) => {
+    const result = scheduleSchema.safeParse({
+      hour: editValues.hour,
+      minute: editValues.minute,
+      day_of_week: editValues.day_of_week || '',
+    })
+    if (!result.success) {
+      setEditError(result.error.issues[0]?.message || 'Invalid schedule values')
+      return
+    }
+    setEditError(null)
     updateMutation.mutate({
       taskType,
       updates: {
@@ -154,7 +153,9 @@ export default function SchedulePage() {
     return (
       <div className="space-y-6">
         <h1 className="text-3xl font-bold">Schedule</h1>
-        <div className="text-center py-8">Loading...</div>
+        <SkeletonCard className="h-48" />
+        <SkeletonCard className="h-48" />
+        <SkeletonCard className="h-48" />
       </div>
     )
   }
@@ -287,10 +288,16 @@ export default function SchedulePage() {
                       <Button
                         size="sm"
                         variant="ghost"
-                        onClick={() => setEditing(null)}
+                        onClick={() => {
+                          setEditing(null)
+                          setEditError(null)
+                        }}
                       >
                         Cancel
                       </Button>
+                      {editError && editing === schedule.task_type && (
+                        <p className="text-sm text-destructive ml-1">{editError}</p>
+                      )}
                     </div>
                   ) : (
                     <div className="flex items-center gap-2 text-sm">
