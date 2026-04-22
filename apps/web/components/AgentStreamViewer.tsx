@@ -89,23 +89,23 @@ export function AgentStreamViewer({
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h3 className="text-lg font-semibold">Research Agent</h3>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          <h3 className="text-base sm:text-lg font-semibold">Research Agent</h3>
           {isRunning && (
-            <Badge variant="default" className="animate-pulse bg-green-500">
+            <Badge variant="default" className="animate-pulse bg-green-500 text-xs">
               <Loader2 className="h-3 w-3 mr-1 animate-spin" />
               Running
             </Badge>
           )}
           {isComplete && !hasError && (
-            <Badge variant="secondary" className="bg-green-100 text-green-800">
+            <Badge variant="secondary" className="bg-green-100 text-green-800 text-xs">
               <CheckCircle className="h-3 w-3 mr-1" />
               Complete
             </Badge>
           )}
           {hasError && (
-            <Badge variant="destructive">
+            <Badge variant="destructive" className="text-xs">
               <XCircle className="h-3 w-3 mr-1" />
               Error
             </Badge>
@@ -113,7 +113,7 @@ export function AgentStreamViewer({
         </div>
 
         {!isRunning && !isComplete && (
-          <Button onClick={startStream} size="sm">
+          <Button onClick={startStream} size="sm" className="w-full sm:w-auto">
             <Play className="h-4 w-4 mr-2" />
             Start Research
           </Button>
@@ -124,7 +124,7 @@ export function AgentStreamViewer({
       {threadId ? (
         <Card>
           <CardContent className="p-0">
-            <div className="h-[500px]">
+            <div className="h-[50vh] sm:h-[500px]">
               <Conversation>
                 <ConversationContent className="p-4">
                   {stream.messages.length === 0 && !isRunning && (

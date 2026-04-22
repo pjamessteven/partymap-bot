@@ -9,6 +9,7 @@ import type { Thread } from '@/lib/api'
 import { Play, Check, X, Clock, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { formatDistanceToNow } from 'date-fns'
+import { useDocumentVisibility } from '@/lib/hooks/use-document-visibility'
 
 interface ThreadListProps {
   agentType: 'research' | 'discovery'
@@ -17,10 +18,11 @@ interface ThreadListProps {
 }
 
 export function ThreadList({ agentType, selectedThread, onSelectThread }: ThreadListProps) {
+  const isVisible = useDocumentVisibility()
   const { data, isLoading, error } = useQuery({
     queryKey: ['threads', agentType],
     queryFn: () => getThreads(agentType),
-    refetchInterval: 3000, // Poll every 3 seconds
+    refetchInterval: isVisible ? 3000 : false,
   })
 
   const threads = data?.threads || []

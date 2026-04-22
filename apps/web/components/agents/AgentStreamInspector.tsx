@@ -47,6 +47,7 @@ import { ThinkingTimeline } from "./ThinkingTimeline";
 import { RichToolOutput } from "./RichToolOutput";
 import { useAgentStream, type TokenUsage } from "@/lib/hooks/use-agent-stream";
 import { Zap } from "lucide-react";
+import { FestivalProfileCard } from "./FestivalProfileCard";
 
 function TokenBar({
   usage,
@@ -65,12 +66,13 @@ function TokenBar({
     );
 
   return (
-    <div className="flex items-center gap-3 text-xs text-muted-foreground bg-muted/50 rounded-md px-3 py-1.5">
+    <div className="flex items-center gap-2 sm:gap-3 text-xs text-muted-foreground bg-muted/50 rounded-md px-2 sm:px-3 py-1.5">
       {statusIcon}
       {usage.total_tokens > 0 && (
         <>
-          <Zap className="h-3.5 w-3.5 text-yellow-500" />
-          <div className="flex-1 flex items-center gap-2">
+          <Zap className="h-3.5 w-3.5 text-yellow-500 shrink-0 hidden sm:block" />
+          {/* Desktop: full breakdown */}
+          <div className="hidden sm:flex flex-1 items-center gap-2">
             <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden flex">
               <div
                 className="bg-blue-500 h-full"
@@ -94,7 +96,7 @@ function TokenBar({
               />
             </div>
           </div>
-          <div className="flex items-center gap-3 shrink-0">
+          <div className="hidden sm:flex items-center gap-3 shrink-0">
             <span>
               <span className="text-blue-600 font-medium">
                 {usage.prompt_tokens.toLocaleString()}
@@ -111,6 +113,10 @@ function TokenBar({
               {usage.total_tokens.toLocaleString()} total
             </span>
           </div>
+          {/* Mobile: compact total only */}
+          <span className="sm:hidden font-semibold text-foreground">
+            {usage.total_tokens.toLocaleString()} tokens
+          </span>
         </>
       )}
       {usage.total_tokens === 0 && (
@@ -197,22 +203,28 @@ export function AgentStreamInspector({ threadId }: AgentStreamInspectorProps) {
           subagents.length > 0 ? "grid-cols-4" : "grid-cols-3"
         }`}
       >
-        <TabsTrigger value="stream">
-          <Terminal className="h-4 w-4 mr-2" />
-          Stream
+        <TabsTrigger value="stream" className="px-1 sm:px-3">
+          <Terminal className="h-4 w-4 sm:mr-2" />
+          <span className="hidden sm:inline">Stream</span>
         </TabsTrigger>
-        <TabsTrigger value="tools">
-          <Wrench className="h-4 w-4 mr-2" />
-          Tools ({(stream as any).toolCalls?.length || 0})
+        <TabsTrigger value="tools" className="px-1 sm:px-3">
+          <Wrench className="h-4 w-4 sm:mr-2" />
+          <span className="hidden sm:inline">
+            Tools ({(stream as any).toolCalls?.length || 0})
+          </span>
         </TabsTrigger>
-        <TabsTrigger value="reasoning">
-          <Brain className="h-4 w-4 mr-2" />
-          Reasoning ({reasoningSteps.length})
+        <TabsTrigger value="reasoning" className="px-1 sm:px-3">
+          <Brain className="h-4 w-4 sm:mr-2" />
+          <span className="hidden sm:inline">
+            Reasoning ({reasoningSteps.length})
+          </span>
         </TabsTrigger>
         {subagents.length > 0 && (
-          <TabsTrigger value="subagents">
-            <Bot className="h-4 w-4 mr-2" />
-            Subagents ({subagents.length})
+          <TabsTrigger value="subagents" className="px-1 sm:px-3">
+            <Bot className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">
+              Subagents ({subagents.length})
+            </span>
           </TabsTrigger>
         )}
       </TabsList>
@@ -220,9 +232,11 @@ export function AgentStreamInspector({ threadId }: AgentStreamInspectorProps) {
       <TokenBar usage={tokenUsage} status={connectionStatus} />
 
       <TabsContent value="stream" className="flex-1 min-h-0 mt-2">
-        <div className="h-full">
+        <div className="h-full overflow-y-auto space-y-3 p-2">
+          <FestivalProfileCard events={customEvents} />
+
           <Conversation>
-            <ConversationContent className="p-2">
+            <ConversationContent className="p-0">
               {stream.messages.length === 0 && !stream.isLoading && (
                 <div className="flex h-full items-center justify-center text-muted-foreground">
                   Waiting for agent...
