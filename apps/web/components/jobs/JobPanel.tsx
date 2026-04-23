@@ -18,11 +18,12 @@ import {
   stopGoabaseJob,
   getJobsStatus,
 } from '@/lib/api'
+import { useJobWebSocket } from '@/lib/hooks/use-job-websocket'
 import type { JobStatusDetail } from '@/types'
-import { Loader2, Play, Square, RefreshCw, CheckCircle, XCircle, Clock } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { Loader2, Play, Square, CheckCircle, XCircle, Clock } from 'lucide-react'
+import { cn, formatRelativeTime } from '@/lib/utils'
 import { useToast } from '@/components/ui/toast-provider'
-import { useDocumentVisibility } from '@/lib/hooks/use-document-visibility'
+import { JobStream } from './JobStream'
 
 interface JobPanelProps {
   jobType: 'discovery' | 'research' | 'sync' | 'goabase'
@@ -33,20 +34,30 @@ export function JobPanel({ jobType, showStream }: JobPanelProps) {
   const [selectedThread, setSelectedThread] = useState<string | null>(null)
   const [isStarting, setIsStarting] = useState(false)
   const [isStopping, setIsStopping] = useState(false)
-  const { success, error } = useToast()
+  const { success } = useToast()
 
-  // Fetch job status
-  const { data: status, refetch } = useJobStatus(jobType)
+  // Real-time WebSocket + REST fallback
+  const { statuses: wsStatuses } = useJobWebSocket()
+  const { data: restStatuses } = useQuery({
+    queryKey: ['job-status', jobType],
+    queryFn: getJobsStatus,
+    refetchInterval: 5000,
+  })
+
+  const allStatuses = wsStatuses || restStatuses
+  const status = allStatuses?.[jobType]
+  const isRunning = status?.status === 'running'
 
   const handleStart = async () => {
     setIsStarting(true)
     try {
+      let result
       switch (jobType) {
         case 'discovery':
-          await startDiscoveryJob()
+          result = await startDiscoveryJob()
           break
         case 'goabase':
-          await startGoabaseJob()
+          result = await startGoabaseJob()
           break
         case 'research':
           await startResearchJob()
@@ -57,8 +68,13 @@ export function JobPanel({ jobType, showStream }: JobPanelProps) {
         default:
           throw new Error(`Unknown job type: ${jobType}`)
       }
+
+      // If we got a thread_id, select it to show the stream
+      if (result?.thread_id) {
+        setSelectedThread(result.thread_id)
+      }
+
       success(`${jobType} job started`)
-      await refetch()
     } catch {
       // Error toast handled by API interceptor
     } finally {
@@ -86,15 +102,12 @@ export function JobPanel({ jobType, showStream }: JobPanelProps) {
           throw new Error(`Unknown job type: ${jobType}`)
       }
       success(`${jobType} job stopped`)
-      await refetch()
     } catch {
       // Error toast handled by API interceptor
     } finally {
       setIsStopping(false)
     }
   }
-
-  const isRunning = status?.status === 'running'
 
   return (
     <div className="grid h-full grid-cols-3 gap-4">
@@ -112,19 +125,23 @@ export function JobPanel({ jobType, showStream }: JobPanelProps) {
 
         {showStream && (
           <ThreadList
-            agentType={jobType as 'research' | 'discovery'}
+            agentType={jobType as 'research' | 'discovery' | 'goabase'}
             selectedThread={selectedThread}
             onSelectThread={setSelectedThread}
           />
         )}
 
-        <ProcessingFestivals jobType={jobType} />
+        <ProcessingFestivals jobType={jobType} status={status} />
       </div>
 
-      {/* Right: Agent Stream or Job Status */}
+      {/* Right: Job Stream or Job Status */}
       <div className="col-span-2 overflow-hidden rounded-lg border">
-        {showStream ? (
-          <AgentStream threadId={selectedThread} />
+        {showStream && selectedThread ? (
+          jobType === 'research' ? (
+            <AgentStream threadId={selectedThread} />
+          ) : (
+            <JobStream threadId={selectedThread} jobType={jobType} />
+          )
         ) : (
           <JobStatusPanel jobType={jobType} status={status} />
         )}
@@ -247,17 +264,43 @@ function JobControlCard({
   )
 }
 
-function ProcessingFestivals({ jobType }: { jobType: string }) {
-  // This would fetch currently processing festivals for this job type
+function ProcessingFestivals({
+  jobType,
+  status,
+}: {
+  jobType: string
+  status?: JobStatusDetail
+}) {
+  const processing = status?.currently_processing
+
   return (
     <Card>
       <CardHeader className="pb-3">
         <CardTitle className="text-sm font-medium">Processing</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="text-sm text-muted-foreground">
-          No festivals currently processing
-        </div>
+        {processing && processing.length > 0 ? (
+          <div className="space-y-2">
+            {processing.slice(0, 5).map((item) => (
+              <div
+                key={item.id}
+                className="flex items-center justify-between text-sm rounded-md bg-muted/50 px-2 py-1"
+              >
+                <span className="truncate">{item.name}</span>
+                <Loader2 className="h-3 w-3 animate-spin text-muted-foreground flex-shrink-0" />
+              </div>
+            ))}
+            {processing.length > 5 && (
+              <p className="text-xs text-muted-foreground px-2">
+                +{processing.length - 5} more
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="text-sm text-muted-foreground">
+            No festivals currently processing
+          </div>
+        )}
       </CardContent>
     </Card>
   )
@@ -280,7 +323,10 @@ function JobStatusPanel({ jobType, status }: JobStatusPanelProps) {
               className="flex items-center justify-between rounded-md border p-3"
             >
               <span className="font-medium">{item.name}</span>
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {formatRelativeTime(item.started_at)}
+              </div>
             </div>
           ))}
         </div>
@@ -293,19 +339,4 @@ function JobStatusPanel({ jobType, status }: JobStatusPanelProps) {
       )}
     </div>
   )
-}
-
-// Hook for fetching job status
-function useJobStatus(jobType: string) {
-  const isVisible = useDocumentVisibility()
-  const { data, refetch } = useQuery({
-    queryKey: ['job-status', jobType],
-    queryFn: async (): Promise<JobStatusDetail> => {
-      const statuses = await getJobsStatus()
-      return statuses[jobType] || { status: 'idle' }
-    },
-    refetchInterval: isVisible ? 2000 : false,
-  })
-
-  return { data, refetch }
 }

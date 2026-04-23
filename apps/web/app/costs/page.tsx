@@ -7,6 +7,8 @@ import { CostsRangeSelector } from './components/costs-range-selector'
 import api from '@/lib/api'
 import type { CostLog } from '@/types'
 
+export const dynamic = 'force-dynamic'
+
 async function getCostsServer(days: number = 7): Promise<CostLog[]> {
   const response = await api.get('/costs', { params: { days } })
   return response.data
@@ -37,7 +39,7 @@ export default async function CostsPage({
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Cost Tracking</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold">Cost Tracking</h1>
         <CostsRangeSelector days={days} />
       </div>
 

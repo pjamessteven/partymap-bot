@@ -201,7 +201,7 @@ function CreatableLocationSelect({
     if (!trimmed || selected.includes(trimmed)) return
     onChange([...selected, trimmed])
     setInputValue('')
-    setIsOpen(false)
+    // Keep dropdown open for multi-select
   }
 
   const removeLocation = (loc: string) => {
@@ -469,7 +469,7 @@ export default function QueriesPage() {
   if (isLoading) {
     return (
       <div className="space-y-6">
-        <h1 className="text-3xl font-bold">Discovery Queries</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold">Discovery Queries</h1>
         <SkeletonCard className="h-32" />
         <SkeletonCard className="h-48" />
         <SkeletonCard className="h-64" />

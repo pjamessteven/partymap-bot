@@ -1,14 +1,37 @@
 'use client'
 
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { JobPanel } from '@/components/jobs/JobPanel'
+import dynamic from 'next/dynamic'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { getJobsStatus } from '@/lib/api'
+
+const JobPanel = dynamic(
+  () => import('@/components/jobs/JobPanel').then((mod) => mod.JobPanel),
+  { ssr: false }
+)
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import {
+  getJobsStatus,
+  getJobActivity,
+  startJobsBulk,
+  stopJobsBulk,
+} from '@/lib/api'
+import { useJobWebSocket } from '@/lib/hooks/use-job-websocket'
+import { useToast } from '@/components/ui/toast-provider'
 import type { JobStatus } from '@/types'
-import { Activity, Zap, Search, RefreshCw, Database } from 'lucide-react'
-import { useDocumentVisibility } from '@/lib/hooks/use-document-visibility'
+import {
+  Activity,
+  Zap,
+  Search,
+  RefreshCw,
+  Database,
+  Play,
+  Square,
+  Loader2,
+} from 'lucide-react'
+import { formatRelativeTime, cn } from '@/lib/utils'
 
 interface SimpleJobStatus {
   status: string
@@ -27,7 +50,7 @@ export default function JobsPage() {
   return (
     <div className="flex h-[calc(100vh-6rem)] flex-col space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Job Control Center</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold">Job Control Center</h1>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-1 flex-col">
@@ -74,9 +97,9 @@ export default function JobsPage() {
           <JobPanel jobType="sync" showStream={false} />
         </TabsContent>
 
-        {/* Goabase Tab - Standard Job Panel */}
+        {/* Goabase Tab - With AI Elements Stream */}
         <TabsContent value="goabase" className="flex-1">
-          <JobPanel jobType="goabase" showStream={false} />
+          <JobPanel jobType="goabase" showStream={true} />
         </TabsContent>
       </Tabs>
     </div>
@@ -84,11 +107,42 @@ export default function JobsPage() {
 }
 
 function JobOverview() {
-  const isVisible = useDocumentVisibility()
-  const { data: allStatuses } = useQuery({
+  const { statuses: wsStatuses } = useJobWebSocket()
+  const queryClient = useQueryClient()
+  const { success, error } = useToast()
+
+  const { data: allStatusesRest } = useQuery({
     queryKey: ['all-job-statuses'],
     queryFn: getJobsStatus,
-    refetchInterval: isVisible ? 2000 : false,
+    refetchInterval: 5000,
+  })
+
+  const { data: activity } = useQuery({
+    queryKey: ['job-activity', 20],
+    queryFn: () => getJobActivity(undefined, 20),
+    refetchInterval: 5000,
+  })
+
+  const allStatuses = wsStatuses || allStatusesRest
+
+  const startBulkMutation = useMutation({
+    mutationFn: (jobTypes: string[]) => startJobsBulk(jobTypes),
+    onSuccess: (data) => {
+      const succeeded = data.results.filter((r) => r.success).length
+      success(`Started ${succeeded} job(s)`)
+      queryClient.invalidateQueries({ queryKey: ['all-job-statuses'] })
+      queryClient.invalidateQueries({ queryKey: ['job-status'] })
+    },
+  })
+
+  const stopBulkMutation = useMutation({
+    mutationFn: (jobTypes: string[]) => stopJobsBulk(jobTypes),
+    onSuccess: (data) => {
+      const succeeded = data.results.filter((r) => r.success).length
+      success(`Stopped ${succeeded} job(s)`)
+      queryClient.invalidateQueries({ queryKey: ['all-job-statuses'] })
+      queryClient.invalidateQueries({ queryKey: ['job-status'] })
+    },
   })
 
   // Helper function to get status data for a job type
@@ -97,7 +151,6 @@ function JobOverview() {
     return status || { status: 'idle' }
   }
 
-  // Job display configuration
   const jobConfigs = [
     { type: 'discovery', displayName: 'Discovery' },
     { type: 'research', displayName: 'Research' },
@@ -105,42 +158,116 @@ function JobOverview() {
     { type: 'goabase', displayName: 'Goabase Sync' },
   ]
 
+  const idleJobs = jobConfigs
+    .filter((j) => getStatusData(j.type).status !== 'running')
+    .map((j) => j.type)
+
+  const runningJobs = jobConfigs
+    .filter((j) => getStatusData(j.type).status === 'running')
+    .map((j) => j.type)
+
   return (
     <div className="grid h-full grid-cols-1 md:grid-cols-2 gap-4">
-      <Card>
-        <CardHeader>
-          <CardTitle>All Jobs Status</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {jobConfigs.map((job) => (
-              <JobStatusRow
-                key={job.type}
-                name={job.displayName}
-                statusData={getStatusData(job.type)}
-              />
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+      <div className="space-y-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle>All Jobs Status</CardTitle>
+            <div className="flex gap-2">
+              {idleJobs.length > 0 && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => startBulkMutation.mutate(idleJobs)}
+                  disabled={startBulkMutation.isPending}
+                >
+                  {startBulkMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Play className="h-4 w-4" />
+                  )}
+                  <span className="ml-1 hidden sm:inline">Start All</span>
+                </Button>
+              )}
+              {runningJobs.length > 0 && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => stopBulkMutation.mutate(runningJobs)}
+                  disabled={stopBulkMutation.isPending}
+                >
+                  {stopBulkMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Square className="h-4 w-4" />
+                  )}
+                  <span className="ml-1 hidden sm:inline">Stop All</span>
+                </Button>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {jobConfigs.map((job) => (
+                <JobStatusRow
+                  key={job.type}
+                  name={job.displayName}
+                  statusData={getStatusData(job.type)}
+                />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
-      <Card>
+      <Card className="flex flex-col">
         <CardHeader>
           <CardTitle>Recent Activity</CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="text-sm text-muted-foreground">
-            No recent activity
-          </div>
+        <CardContent className="flex-1 overflow-auto">
+          {activity && activity.items.length > 0 ? (
+            <div className="space-y-2">
+              {activity.items.map((item) => (
+                <div
+                  key={item.id}
+                  className="flex items-center justify-between rounded-lg border p-3"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Badge variant="outline" className="capitalize flex-shrink-0">
+                      {item.job_type}
+                    </Badge>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{item.message}</p>
+                      <p className="text-xs text-muted-foreground capitalize">
+                        {item.activity_type}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-xs text-muted-foreground flex-shrink-0 ml-2">
+                    {formatRelativeTime(item.created_at)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-sm text-muted-foreground text-center py-8">
+              No recent activity
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
   )
 }
 
-function JobStatusRow({ name, statusData }: { name: string; statusData: SimpleJobStatus }) {
+function JobStatusRow({
+  name,
+  statusData,
+}: {
+  name: string
+  statusData: SimpleJobStatus
+}) {
   const status = statusData.status
-  
+
   const getStatusColor = () => {
     switch (status) {
       case 'running':

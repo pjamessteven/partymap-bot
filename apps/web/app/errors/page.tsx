@@ -14,6 +14,7 @@ import { ErrorDashboard } from '@/components/ErrorDashboard'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { AlertTriangle, RefreshCw } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import type { FestivalWithValidation, FestivalState } from '@/types'
 
 export default function ErrorsPage() {
@@ -87,11 +88,13 @@ export default function ErrorsPage() {
     refetchCB()
   }
 
+  const allQuarantinedIds = quarantined?.items.map((item: any) => item.id) || []
+
   if (isLoading) {
     return (
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <h1 className="text-3xl font-bold">Error Dashboard</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold">Error Dashboard</h1>
         </div>
         <Card>
           <CardContent className="pt-6">
@@ -127,12 +130,25 @@ export default function ErrorsPage() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <AlertTriangle className="h-8 w-8 text-red-500" />
-          <h1 className="text-3xl font-bold">Error Dashboard</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold">Error Dashboard</h1>
         </div>
-        <Button onClick={refreshAll} variant="outline" size="sm">
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          {allQuarantinedIds.length > 0 && (
+            <Button
+              onClick={() => bulkRetryMutation.mutate(allQuarantinedIds)}
+              disabled={bulkRetryMutation.isPending}
+              variant="outline"
+              size="sm"
+            >
+              <RefreshCw className={cn('h-4 w-4 mr-2', bulkRetryMutation.isPending && 'animate-spin')} />
+              Retry All ({allQuarantinedIds.length})
+            </Button>
+          )}
+          <Button onClick={refreshAll} variant="outline" size="sm">
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {stats && quarantined && circuitBreakers && (
@@ -157,12 +173,12 @@ export default function ErrorsPage() {
               <div key={name} className="flex items-center gap-2">
                 <span className="text-sm font-medium capitalize">{name}:</span>
                 <span
-                  className={`text-xs px-2 py-1 rounded-full ${
+                  className={`text-xs px-2 py-1 rounded-full border ${
                     metrics.state === 'open'
-                      ? 'bg-red-100 text-red-700'
+                      ? 'border-red-500 text-red-600 bg-red-50 dark:bg-red-950/20'
                       : metrics.state === 'half_open'
-                      ? 'bg-yellow-100 text-yellow-700'
-                      : 'bg-green-100 text-green-700'
+                      ? 'border-yellow-500 text-yellow-600 bg-yellow-50 dark:bg-yellow-950/20'
+                      : 'border-green-500 text-green-600 bg-green-50 dark:bg-green-950/20'
                   }`}
                 >
                   {metrics.state}

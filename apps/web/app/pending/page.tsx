@@ -89,7 +89,7 @@ export default function PendingPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Pending Actions</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold">Pending Actions</h1>
         <Button onClick={() => refetch()} variant="outline" size="sm">
           <RefreshCw className="h-4 w-4 mr-2" />
           Refresh
@@ -146,7 +146,7 @@ export default function PendingPage() {
                 return (
                   <div
                     key={item.festival_id}
-                    className="flex items-center justify-between rounded-lg border p-4"
+                    className="flex items-center justify-between rounded-lg border p-3"
                   >
                     <div className="flex items-center gap-4">
                       <StateBadge state={item.state} className="hidden sm:inline-flex" />

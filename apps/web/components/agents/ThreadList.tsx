@@ -12,7 +12,7 @@ import { formatDistanceToNow } from 'date-fns'
 import { useDocumentVisibility } from '@/lib/hooks/use-document-visibility'
 
 interface ThreadListProps {
-  agentType: 'research' | 'discovery'
+  agentType: 'research' | 'discovery' | 'goabase' | 'sync'
   selectedThread: string | null
   onSelectThread: (threadId: string) => void
 }

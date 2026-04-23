@@ -12,12 +12,21 @@ import {
   retryFestival,
   resetFestival,
   forceSyncFestival,
+  validateFestival,
+  getJobActivity,
 } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { TagList } from '@/components/agents/TagBadge'
 import { Button } from '@/components/ui/button'
-import { getStateColor, getStateLabel, formatDate, formatCurrency, getPartyMapUrl } from '@/lib/utils'
+import {
+  getStateColor,
+  getStateLabel,
+  formatDate,
+  formatCurrency,
+  getPartyMapUrl,
+  formatRelativeTime,
+} from '@/lib/utils'
 import Link from 'next/link'
 import {
   ArrowLeft,
@@ -29,13 +38,34 @@ import {
   SkipForward,
   AlertTriangle,
   ExternalLink,
+  DollarSign,
+  Calendar,
+  Users,
+  MapPin,
+  Ticket,
+  ShieldCheck,
+  ShieldAlert,
+  ClipboardCheck,
+  Loader2,
+  Activity,
+  Copy,
+  Check,
+  Edit,
 } from 'lucide-react'
+import { Separator } from '@/components/ui/separator'
 import type { FestivalState } from '@/types'
-import { AgentStreamViewer } from '@/components/AgentStreamViewer'
+import type { JobActivityItem } from '@/lib/api'
+import dynamic from 'next/dynamic'
 import { useToast } from '@/components/ui/toast-provider'
+
+const AgentStreamViewer = dynamic(
+  () => import('@/components/AgentStreamViewer').then((mod) => mod.AgentStreamViewer),
+  { ssr: false }
+)
 import { StateBadge } from '@/components/state-badge'
 import { ConfirmDialog, PromptDialog } from '@/components/ui/dialog-confirm'
 import { SkeletonCard } from '@/components/ui/skeleton'
+import { FestivalEditor } from '@/components/FestivalEditor'
 
 export default function FestivalDetailPage() {
   const params = useParams()
@@ -48,10 +78,17 @@ export default function FestivalDetailPage() {
   const [skipDialogOpen, setSkipDialogOpen] = useState(false)
   const [resetDialogOpen, setResetDialogOpen] = useState(false)
   const [forceSyncDialogOpen, setForceSyncDialogOpen] = useState(false)
+  const [editDialogOpen, setEditDialogOpen] = useState(false)
 
   const { data: festival, isLoading } = useQuery({
     queryKey: ['festival', id],
     queryFn: () => getFestival(id),
+  })
+
+  const { data: activity } = useQuery({
+    queryKey: ['job-activity', id, 20],
+    queryFn: () => getJobActivity(undefined, 20),
+    refetchInterval: 10000,
   })
 
   const invalidateFestival = () => {
@@ -119,6 +156,22 @@ export default function FestivalDetailPage() {
     onSuccess: () => {
       invalidateFestival()
       success('Force sync started')
+    },
+    onError: (err: Error) => setActionError(err.message),
+  })
+
+  const validateMutation = useMutation({
+    mutationFn: () => validateFestival(id),
+    onSuccess: (data) => {
+      invalidateFestival()
+      const v = data.validation
+      if (v.is_valid) {
+        success(`Validation passed — ${Math.round(v.completeness_score * 100)}% complete`)
+      } else {
+        toastError(
+          `Validation failed — ${v.errors.length} error(s), ${v.warnings.length} warning(s)`
+        )
+      }
     },
     onError: (err: Error) => setActionError(err.message),
   })
@@ -200,8 +253,31 @@ export default function FestivalDetailPage() {
       })
     }
 
+    // Edit action for festivals that can be manually edited
+    if (
+      festival.state === 'researched_partial' ||
+      festival.state === 'researched' ||
+      festival.state === 'validation_failed' ||
+      festival.state === 'needs_review'
+    ) {
+      actions.push({
+        label: 'Edit',
+        icon: Edit,
+        onClick: () => setEditDialogOpen(true),
+        loading: false,
+        variant: 'default' as const,
+      })
+    }
+
     // Always available
     actions.push(
+      {
+        label: 'Validate',
+        icon: ClipboardCheck,
+        onClick: () => validateMutation.mutate(),
+        loading: validateMutation.isPending,
+        variant: 'outline' as const,
+      },
       {
         label: 'Skip',
         icon: SkipForward,
@@ -233,6 +309,12 @@ export default function FestivalDetailPage() {
 
   const actions = getAvailableActions()
 
+  // Filter activity items for this festival
+  const festivalActivity =
+    activity?.items.filter(
+      (item: JobActivityItem) => item.festival_id === id
+    ) || []
+
   // Function to render research outcome summary
   const renderResearchOutcome = (researchData: Record<string, any>) => {
     // Check if this is a structured ResearchResult
@@ -251,11 +333,35 @@ export default function FestivalDetailPage() {
                 <div className="mt-2 text-sm bg-green-50 p-3 rounded border border-green-200">
                   <p className="font-medium">Collected data:</p>
                   <ul className="list-disc pl-5 mt-1 space-y-1">
-                    {researchData.festival_data.name && <li>Name: {researchData.festival_data.name}</li>}
-                    {researchData.festival_data.description && <li>Description: {researchData.festival_data.description.substring(0, 100)}...</li>}
-                    {researchData.festival_data.url && <li>URL: <a href={researchData.festival_data.url} className="text-blue-600 hover:underline" target="_blank" rel="noopener noreferrer">{researchData.festival_data.url}</a></li>}
+                    {researchData.festival_data.name && (
+                      <li>Name: {researchData.festival_data.name}</li>
+                    )}
+                    {researchData.festival_data.description && (
+                      <li>
+                        Description:{' '}
+                        {researchData.festival_data.description.substring(0, 100)}...
+                      </li>
+                    )}
+                    {researchData.festival_data.url && (
+                      <li>
+                        URL:{' '}
+                        <a
+                          href={researchData.festival_data.url}
+                          className="text-blue-600 hover:underline"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {researchData.festival_data.url}
+                        </a>
+                      </li>
+                    )}
                     {researchData.festival_data.logo && <li>Logo URL provided</li>}
-                    {researchData.festival_data.date_time && <li>Dates: {researchData.festival_data.date_time.start} to {researchData.festival_data.date_time.end}</li>}
+                    {researchData.festival_data.date_time && (
+                      <li>
+                        Dates: {researchData.festival_data.date_time.start} to{' '}
+                        {researchData.festival_data.date_time.end}
+                      </li>
+                    )}
                     {researchData.festival_data.tags && (
                       <li className="list-none mt-2">
                         <TagList tags={researchData.festival_data.tags} />
@@ -274,29 +380,36 @@ export default function FestivalDetailPage() {
           <div className="space-y-3">
             <div className="flex items-center text-red-600">
               <XCircle className="h-5 w-5 mr-2" />
-              <span className="font-medium">Research failed: {failure.reason}</span>
+              <span className="font-medium">
+                Research failed: {failure.reason}
+              </span>
             </div>
             <div className="text-sm">
               <p className="text-red-600">{failure.message}</p>
               {failure.completeness_score > 0 && (
                 <div className="mt-3">
-                  <p className="font-medium mb-1">Progress: {Math.round(failure.completeness_score * 100)}% complete</p>
+                  <p className="font-medium mb-1">
+                    Progress: {Math.round(failure.completeness_score * 100)}% complete
+                  </p>
                   <div className="w-full bg-gray-200 rounded-full h-2.5">
-                    <div 
-                      className="bg-yellow-500 h-2.5 rounded-full" 
+                    <div
+                      className="bg-yellow-500 h-2.5 rounded-full"
                       style={{ width: `${failure.completeness_score * 100}%` }}
                     ></div>
                   </div>
                 </div>
               )}
-              {failure.collected_partial_data && Object.keys(failure.collected_partial_data).length > 0 && (
-                <div className="mt-3">
-                  <p className="font-medium mb-1">Partial data collected:</p>
-                  <div className="bg-yellow-50 p-3 rounded border border-yellow-200 text-sm">
-                    <pre className="whitespace-pre-wrap">{JSON.stringify(failure.collected_partial_data, null, 2)}</pre>
+              {failure.collected_partial_data &&
+                Object.keys(failure.collected_partial_data).length > 0 && (
+                  <div className="mt-3">
+                    <p className="font-medium mb-1">Partial data collected:</p>
+                    <div className="bg-yellow-50 p-3 rounded border border-yellow-200 text-sm">
+                      <pre className="whitespace-pre-wrap">
+                        {JSON.stringify(failure.collected_partial_data, null, 2)}
+                      </pre>
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
               {failure.missing_fields && failure.missing_fields.length > 0 && (
                 <div className="mt-3">
                   <p className="font-medium mb-1">Missing required fields:</p>
@@ -312,27 +425,32 @@ export default function FestivalDetailPage() {
         )
       }
     }
-    
+
     // Legacy format or raw data - fallback to showing the structure
     if (festival.failure_reason) {
       return (
         <div className="space-y-2">
           <div className="flex items-center text-red-600">
             <XCircle className="h-5 w-5 mr-2" />
-            <span className="font-medium">Research failed: {festival.failure_reason}</span>
+            <span className="font-medium">
+              Research failed: {festival.failure_reason}
+            </span>
           </div>
           {festival.failure_message && (
             <p className="text-sm text-red-600">{festival.failure_message}</p>
           )}
-          {festival.research_completeness_score !== undefined && festival.research_completeness_score > 0 && (
-            <div className="mt-2">
-              <p className="text-sm font-medium">Completeness: {Math.round(festival.research_completeness_score * 100)}%</p>
-            </div>
-          )}
+          {festival.research_completeness_score !== undefined &&
+            festival.research_completeness_score > 0 && (
+              <div className="mt-2">
+                <p className="text-sm font-medium">
+                  Completeness: {Math.round(festival.research_completeness_score * 100)}%
+                </p>
+              </div>
+            )}
         </div>
       )
     }
-    
+
     // Unknown format - show raw data
     return (
       <div className="text-sm text-muted-foreground">
@@ -353,13 +471,54 @@ export default function FestivalDetailPage() {
         <StateBadge state={festival.state} className="text-sm px-3 py-1" />
       </div>
 
-      <h1 className="text-2xl sm:text-3xl font-bold break-words">{festival.name}</h1>
+      <h1 className="text-2xl sm:text-3xl font-bold break-words">
+        {festival.name}
+      </h1>
 
       {actionError && (
         <div className="rounded-lg border border-destructive bg-destructive/10 p-4 text-destructive">
           {actionError}
         </div>
       )}
+
+      {/* Status Badges Row */}
+      <div className="flex flex-wrap gap-2">
+        {festival.is_duplicate && (
+          <Badge variant="destructive" className="gap-1">
+            <Copy className="h-3 w-3" /> Duplicate
+          </Badge>
+        )}
+        {festival.is_new_event_date && (
+          <Badge variant="secondary" className="gap-1">
+            <Calendar className="h-3 w-3" /> New Date
+          </Badge>
+        )}
+        {festival.date_confirmed ? (
+          <Badge variant="default" className="bg-green-500 gap-1">
+            <Check className="h-3 w-3" /> Date Confirmed
+          </Badge>
+        ) : (
+          <Badge variant="outline" className="gap-1">
+            <AlertTriangle className="h-3 w-3" /> Unconfirmed
+          </Badge>
+        )}
+        {festival.research_completeness_score !== undefined && (
+          <Badge
+            variant={
+              festival.research_completeness_score >= 0.8
+                ? 'default'
+                : festival.research_completeness_score >= 0.5
+                  ? 'secondary'
+                  : 'destructive'
+            }
+            className={
+              festival.research_completeness_score >= 0.8 ? 'bg-green-500' : ''
+            }
+          >
+            {Math.round(festival.research_completeness_score * 100)}% Complete
+          </Badge>
+        )}
+      </div>
 
       {/* Actions */}
       <Card>
@@ -378,7 +537,9 @@ export default function FestivalDetailPage() {
                   variant={action.variant}
                   className="gap-2"
                 >
-                  <Icon className={`h-4 w-4 ${action.loading ? 'animate-spin' : ''}`} />
+                  <Icon
+                    className={`h-4 w-4 ${action.loading ? 'animate-spin' : ''}`}
+                  />
                   {action.label}
                 </Button>
               )
@@ -387,8 +548,8 @@ export default function FestivalDetailPage() {
         </CardContent>
       </Card>
 
-      {/* Details */}
-      <div className="grid gap-6 md:grid-cols-2">
+      {/* Details + Integration + Costs */}
+      <div className="grid gap-6 md:grid-cols-3">
         <Card>
           <CardHeader>
             <CardTitle>Basic Info</CardTitle>
@@ -396,19 +557,27 @@ export default function FestivalDetailPage() {
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4 text-sm">
               <div className="text-muted-foreground sm:text-right">ID</div>
-              <div className="sm:col-span-2 font-mono text-xs break-all">{festival.id}</div>
+              <div className="sm:col-span-2 font-mono text-xs break-all">
+                {festival.id}
+              </div>
 
               <div className="text-muted-foreground sm:text-right">Source</div>
               <div className="sm:col-span-2">{festival.source}</div>
 
-              <div className="text-muted-foreground sm:text-right">Retry Count</div>
+              <div className="text-muted-foreground sm:text-right">
+                Retry Count
+              </div>
               <div className="sm:col-span-2">{festival.retry_count}</div>
 
               <div className="text-muted-foreground sm:text-right">Created</div>
-              <div className="sm:col-span-2">{formatDate(festival.created_at)}</div>
+              <div className="sm:col-span-2">
+                {formatDate(festival.created_at)}
+              </div>
 
               <div className="text-muted-foreground sm:text-right">Updated</div>
-              <div className="sm:col-span-2">{formatDate(festival.updated_at)}</div>
+              <div className="sm:col-span-2">
+                {formatDate(festival.updated_at)}
+              </div>
             </div>
 
             {festival.source_url && (
@@ -433,10 +602,17 @@ export default function FestivalDetailPage() {
             {festival.partymap_event_id ? (
               <>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4 text-sm">
-                  <div className="text-muted-foreground sm:text-right">Event ID</div>
+                  <div className="text-muted-foreground sm:text-right">
+                    Event ID
+                  </div>
                   <div className="sm:col-span-2 font-mono text-xs break-all">
                     <a
-                      href={getPartyMapUrl(festival.partymap_event_id, festival.partymap_date_id) || undefined}
+                      href={
+                        getPartyMapUrl(
+                          festival.partymap_event_id,
+                          festival.partymap_date_id
+                        ) || undefined
+                      }
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-blue-600 hover:underline inline-flex items-center gap-1"
@@ -448,10 +624,17 @@ export default function FestivalDetailPage() {
 
                   {festival.partymap_date_id && (
                     <>
-                      <div className="text-muted-foreground sm:text-right">Date ID</div>
+                      <div className="text-muted-foreground sm:text-right">
+                        Date ID
+                      </div>
                       <div className="sm:col-span-2 font-mono text-xs break-all">
                         <a
-                          href={getPartyMapUrl(festival.partymap_event_id, festival.partymap_date_id) || undefined}
+                          href={
+                            getPartyMapUrl(
+                              festival.partymap_event_id,
+                              festival.partymap_date_id
+                            ) || undefined
+                          }
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-blue-600 hover:underline inline-flex items-center gap-1"
@@ -476,7 +659,113 @@ export default function FestivalDetailPage() {
             )}
           </CardContent>
         </Card>
+
+        {/* Costs Card */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <DollarSign className="h-5 w-5 text-amber-500" />
+              Costs
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Discovery</span>
+              <span className="font-medium">
+                {formatCurrency(festival.discovery_cost_cents ?? 0)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Research</span>
+              <span className="font-medium">
+                {formatCurrency(festival.research_cost_cents ?? 0)}
+              </span>
+            </div>
+            <Separator />
+            <div className="flex items-center justify-between text-sm font-semibold">
+              <span>Total</span>
+              <span>{formatCurrency(festival.total_cost_cents ?? 0)}</span>
+            </div>
+          </CardContent>
+        </Card>
       </div>
+
+      {/* Event Dates */}
+      {festival.event_dates && festival.event_dates.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Calendar className="h-5 w-5 text-muted-foreground" />
+              Event Dates
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {festival.event_dates.map((ed: any, idx: number) => (
+              <Card key={ed.id || idx}>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Calendar className="h-4 w-4 text-muted-foreground" />
+                    {ed.start_date
+                      ? new Date(ed.start_date).toLocaleDateString()
+                      : 'TBD'}
+                    {ed.end_date && ed.end_date !== ed.start_date && (
+                      <span className="text-muted-foreground font-normal">
+                        {' '}
+                        — {new Date(ed.end_date).toLocaleDateString()}
+                      </span>
+                    )}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm">
+                  {ed.venue && (
+                    <div className="flex items-start gap-2">
+                      <MapPin className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+                      <span>{ed.venue}</span>
+                    </div>
+                  )}
+                  {ed.location && (
+                    <div className="flex items-start gap-2">
+                      <MapPin className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+                      <span>{ed.location}</span>
+                    </div>
+                  )}
+                  {ed.lineup && ed.lineup.length > 0 && (
+                    <div className="flex items-start gap-2">
+                      <Users className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+                      <span className="truncate">
+                        {ed.lineup.slice(0, 5).join(', ')}
+                        {ed.lineup.length > 5 && ` +${ed.lineup.length - 5} more`}
+                      </span>
+                    </div>
+                  )}
+                  {ed.ticket_url && (
+                    <a
+                      href={ed.ticket_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 text-primary hover:underline"
+                    >
+                      <Ticket className="h-4 w-4" />
+                      Tickets
+                    </a>
+                  )}
+                  {ed.price_info && (
+                    <div className="flex items-start gap-2">
+                      <DollarSign className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+                      <span>{ed.price_info}</span>
+                    </div>
+                  )}
+                  {ed.size_estimate && (
+                    <Badge variant="outline">{ed.size_estimate}</Badge>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Last Error */}
       {festival.last_error && (
@@ -516,11 +805,11 @@ export default function FestivalDetailPage() {
             <CardTitle className="flex items-center justify-between">
               <span>Research Outcome</span>
               {festival.research_data.success !== undefined && (
-                <Badge 
-                  variant={festival.research_data.success ? "default" : "destructive"}
-                  className={festival.research_data.success ? "bg-green-500" : ""}
+                <Badge
+                  variant={festival.research_data.success ? 'default' : 'destructive'}
+                  className={festival.research_data.success ? 'bg-green-500' : ''}
                 >
-                  {festival.research_data.success ? "✓ Success" : "✗ Failed"}
+                  {festival.research_data.success ? '✓ Success' : '✗ Failed'}
                 </Badge>
               )}
             </CardTitle>
@@ -528,7 +817,7 @@ export default function FestivalDetailPage() {
           <CardContent className="space-y-4">
             {/* Show simplified outcome summary */}
             {renderResearchOutcome(festival.research_data)}
-            
+
             {/* Expandable detailed view */}
             <details className="mt-4">
               <summary className="cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground">
@@ -538,6 +827,46 @@ export default function FestivalDetailPage() {
                 {JSON.stringify(festival.research_data, null, 2)}
               </pre>
             </details>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Pipeline Activity History */}
+      {festivalActivity.length > 0 && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <Activity className="h-5 w-5 text-muted-foreground" />
+              Pipeline History
+            </CardTitle>
+            <Badge variant="outline">{festivalActivity.length} events</Badge>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {festivalActivity.map((item: JobActivityItem) => (
+                <div
+                  key={item.id}
+                  className="flex items-center justify-between rounded-lg border p-3"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Badge variant="outline" className="capitalize flex-shrink-0">
+                      {item.job_type}
+                    </Badge>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">
+                        {item.message}
+                      </p>
+                      <p className="text-xs text-muted-foreground capitalize">
+                        {item.activity_type}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-xs text-muted-foreground flex-shrink-0 ml-2">
+                    {formatRelativeTime(item.created_at)}
+                  </span>
+                </div>
+              ))}
+            </div>
           </CardContent>
         </Card>
       )}
@@ -595,6 +924,16 @@ export default function FestivalDetailPage() {
           setForceSyncDialogOpen(false)
         }}
         onCancel={() => setForceSyncDialogOpen(false)}
+      />
+
+      {/* Festival Editor Dialog */}
+      <FestivalEditor
+        festivalId={id}
+        festivalName={festival.name}
+        initialData={festival.research_data}
+        currentState={festival.state}
+        open={editDialogOpen}
+        onOpenChange={setEditDialogOpen}
       />
     </div>
   )

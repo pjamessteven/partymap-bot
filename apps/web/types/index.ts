@@ -6,9 +6,7 @@ export type FestivalState =
   | 'needs_research_update'
   | 'researching'
   | 'researched'
-  | 'researched_partial'
-  | 'update_in_progress'
-  | 'update_complete'
+  | 'researched_partial'  // Core info found, logo missing - requires manual edit
   | 'syncing'
   | 'synced'
   | 'validating'
@@ -66,10 +64,14 @@ export interface Festival {
   decisions?: Array<Record<string, unknown>>;
   discovered_data?: Record<string, unknown>;
   research_data?: Record<string, unknown>;
+  sync_data?: Record<string, unknown>;
   current_thread_id?: string;
   failure_reason?: string | null;
   failure_message?: string | null;
   research_completeness_score?: number;
+  workflow_type?: string;
+  update_required?: boolean;
+  update_reasons?: string[];
   created_at: string;
   updated_at: string;
 }
@@ -339,6 +341,22 @@ export interface FestivalWithValidation extends Festival {
   max_retries_reached: boolean;
   quarantined_at?: string;
   quarantine_reason?: string;
+}
+
+// Manual festival update request
+export interface FestivalUpdateRequest {
+  research_data: Record<string, unknown>;  // Complete or partial research data
+  promote_to_researched?: boolean;         // If true, promotes from RESEARCHED_PARTIAL to RESEARCHED
+  reason?: string;                         // Reason for the manual update (audit log)
+}
+
+export interface FestivalUpdateResponse {
+  festival_id: string;
+  message: string;
+  previous_state: FestivalState;
+  new_state: FestivalState;
+  updated_fields: string[];
+  timestamp: string;
 }
 
 // Dead Letter Queue Types

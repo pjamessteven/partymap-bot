@@ -21,6 +21,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import {
   getStateColor,
   getStateLabel,
+  getStateDescription,
   formatRelativeTime,
   getPartyMapUrl,
 } from '@/lib/utils'
@@ -40,6 +41,9 @@ import {
   X,
   CheckSquare,
   Square,
+  Edit,
+  Plus,
+  Info,
 } from 'lucide-react'
 import type { FestivalState } from '@/types'
 import { ValidationBadge, RetryCountBadge } from '@/components/ValidationBadge'
@@ -49,25 +53,58 @@ import { EmptyState } from '@/components/empty-state'
 import { SkeletonList } from '@/components/ui/skeleton'
 import { ConfirmDialog, PromptDialog } from '@/components/ui/dialog-confirm'
 import { useToast } from '@/components/ui/toast-provider'
+import { FestivalEditor } from '@/components/FestivalEditor'
 
-const states: FestivalState[] = [
-  'discovered',
-  'needs_research_new',
-  'needs_research_update',
-  'researching',
-  'researched',
-  'researched_partial',
-  'update_in_progress',
-  'update_complete',
-  'syncing',
-  'synced',
-  'validating',
-  'validation_failed',
-  'quarantined',
-  'failed',
-  'skipped',
-  'needs_review',
-]
+// Grouped states with descriptions for better UX
+const stateGroups = [
+  {
+    label: 'Discovery',
+    states: [
+      { value: 'discovered', label: 'Discovered', description: 'Newly discovered, awaiting deduplication' },
+    ],
+  },
+  {
+    label: 'Workflow',
+    states: [
+      { value: 'needs_research_new', label: 'Needs Research (New)', description: 'New festival ready for research' },
+      { value: 'needs_research_update', label: 'Needs Research (Update)', description: 'Existing event needing update' },
+    ],
+  },
+  {
+    label: 'Research',
+    states: [
+      { value: 'researching', label: 'Researching', description: 'Research agent is actively working' },
+      { value: 'researched', label: 'Researched', description: 'Complete data ready for sync' },
+      { value: 'researched_partial', label: 'Researched (Partial)', description: 'Missing logo - needs manual edit' },
+    ],
+  },
+  {
+    label: 'Sync',
+    states: [
+      { value: 'syncing', label: 'Syncing', description: 'Currently syncing to PartyMap' },
+      { value: 'synced', label: 'Synced', description: 'Successfully synced to PartyMap' },
+    ],
+  },
+  {
+    label: 'Validation',
+    states: [
+      { value: 'validating', label: 'Validating', description: 'Pre-sync validation in progress' },
+      { value: 'validation_failed', label: 'Validation Failed', description: 'Failed validation - needs fixes' },
+      { value: 'needs_review', label: 'Needs Review', description: 'Has warnings but can proceed' },
+    ],
+  },
+  {
+    label: 'Terminal',
+    states: [
+      { value: 'failed', label: 'Failed', description: 'Processing failed - can retry' },
+      { value: 'quarantined', label: 'Quarantined', description: 'Max retries - needs manual intervention' },
+      { value: 'skipped', label: 'Skipped', description: 'Manually excluded' },
+    ],
+  },
+] as const
+
+// Flat list for backward compatibility
+const states: FestivalState[] = stateGroups.flatMap(g => g.states.map(s => s.value as FestivalState))
 
 type SortField = 'created_at' | 'name' | 'state' | 'source' | 'retry_count' | 'validation_status'
 type SortDirection = 'asc' | 'desc'
@@ -96,6 +133,9 @@ export default function FestivalsPage() {
   const [skipDialogOpen, setSkipDialogOpen] = useState(false)
   const [resetDialogOpen, setResetDialogOpen] = useState(false)
   const [bulkActionLoading, setBulkActionLoading] = useState(false)
+
+  // Edit dialog state
+  const [editingFestival, setEditingFestival] = useState<any>(null)
 
   const limit = 20
 
@@ -447,13 +487,18 @@ export default function FestivalsPage() {
                     setOffset(0)
                     clearSelection()
                   }}
-                  className="w-full sm:w-44"
+                  className="w-full sm:w-64"
+                  title={stateGroups.find(g => g.states.find(s => s.value === state))?.states.find(s => s.value === state)?.description || 'Filter by state'}
                 >
                   <option value="">All States</option>
-                  {states.map((s) => (
-                    <option key={s} value={s}>
-                      {getStateLabel(s)}
-                    </option>
+                  {stateGroups.map((group) => (
+                    <optgroup key={group.label} label={group.label}>
+                      {group.states.map((s) => (
+                        <option key={s.value} value={s.value} title={s.description}>
+                          {s.label}
+                        </option>
+                      ))}
+                    </optgroup>
                   ))}
                 </Select>
                 <Select
@@ -551,11 +596,19 @@ export default function FestivalsPage() {
                         className="mt-0.5 sm:mt-0 shrink-0"
                         onClick={(e) => e.stopPropagation()}
                       />
-                      <div
-                        className={`w-3 h-3 rounded-full shrink-0 mt-1.5 sm:mt-0 ${getStateColor(
-                          festival.state
-                        )}`}
-                      />
+                      {/* State Indicator Dot with Tooltip */}
+                      <div className="group relative shrink-0 mt-1.5 sm:mt-0">
+                        <div
+                          className={`w-3 h-3 rounded-full ${getStateColor(festival.state)} cursor-help`}
+                        />
+                        {/* Tooltip */}
+                        <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 hidden group-hover:block w-56 p-2.5 rounded-lg border bg-card shadow-lg z-20">
+                          <p className="text-xs font-medium mb-1">{getStateLabel(festival.state)}</p>
+                          <p className="text-xs text-muted-foreground leading-relaxed">
+                            {getStateDescription(festival.state)}
+                          </p>
+                        </div>
+                      </div>
                       <div className="min-w-0">
                         <Link
                           href={`/festivals/${festival.id}`}
@@ -571,6 +624,75 @@ export default function FestivalsPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2 sm:gap-3 shrink-0 ml-8 sm:ml-0">
+                      {/* Workflow Type Badge */}
+                      {festival.workflow_type && (
+                        <Badge
+                          variant={festival.workflow_type === 'new' ? 'default' : 'secondary'}
+                          className={festival.workflow_type === 'new' ? 'bg-blue-500 text-xs' : 'text-xs'}
+                        >
+                          {festival.workflow_type === 'new' ? (
+                            <><Plus className="h-3 w-3 mr-1" /> New</>
+                          ) : (
+                            <><RotateCcw className="h-3 w-3 mr-1" /> Update</>
+                          )}
+                        </Badge>
+                      )}
+
+                      {/* Update Reasons Tooltip */}
+                      {festival.update_reasons && festival.update_reasons.length > 0 && (
+                        <div className="group relative">
+                          <Badge variant="outline" className="text-xs cursor-help">
+                            <Info className="h-3 w-3 mr-1" />
+                            {festival.update_reasons.length} reason{festival.update_reasons.length > 1 ? 's' : ''}
+                          </Badge>
+                          <div className="absolute bottom-full right-0 mb-2 hidden group-hover:block w-48 p-2 rounded-lg border bg-card shadow-lg z-10">
+                            <p className="text-xs font-medium mb-1">Update reasons:</p>
+                            <ul className="text-xs text-muted-foreground space-y-0.5">
+                              {festival.update_reasons.map((reason: string, idx: number) => (
+                                <li key={idx}>• {reason.replace(/_/g, ' ')}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Sync Result */}
+                      {festival.sync_data && festival.sync_data.action && (
+                        <Badge
+                          variant="outline"
+                          className={`text-xs capitalize ${
+                            festival.sync_data.action === 'created'
+                              ? 'border-green-500 text-green-600 bg-green-50 dark:bg-green-950/20'
+                              : festival.sync_data.action === 'updated'
+                                ? 'border-blue-500 text-blue-600 bg-blue-50 dark:bg-blue-950/20'
+                                : festival.sync_data.action === 'added_event_date'
+                                  ? 'border-purple-500 text-purple-600 bg-purple-50 dark:bg-purple-950/20'
+                                  : 'border-gray-500 text-gray-600 bg-gray-50 dark:bg-gray-950/20'
+                          }`}
+                        >
+                          {festival.sync_data.action === 'added_event_date'
+                            ? 'New Date'
+                            : festival.sync_data.action}
+                        </Badge>
+                      )}
+
+                      {/* Quick Edit Button for editable states */}
+                      {(festival.state === 'researched_partial' ||
+                        festival.state === 'researched' ||
+                        festival.state === 'validation_failed' ||
+                        festival.state === 'needs_review') && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setEditingFestival(festival)
+                          }}
+                          className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-200 dark:bg-blue-900 dark:text-blue-200"
+                          title="Edit festival details"
+                        >
+                          <Edit className="h-3 w-3" />
+                          Edit
+                        </button>
+                      )}
                       {festival.partymap_event_id && (
                         <a
                           href={
@@ -598,12 +720,22 @@ export default function FestivalsPage() {
                       {festival.retry_count > 0 && (
                         <RetryCountBadge count={festival.retry_count} />
                       )}
-                      <Badge
-                        variant="secondary"
-                        className={`${getStateColor(festival.state)} text-white text-xs sm:text-sm`}
-                      >
-                        {getStateLabel(festival.state)}
-                      </Badge>
+                      {/* State Badge with Tooltip */}
+                      <div className="group relative">
+                        <Badge
+                          variant="secondary"
+                          className={`${getStateColor(festival.state)} text-white text-xs sm:text-sm cursor-help`}
+                        >
+                          {getStateLabel(festival.state)}
+                        </Badge>
+                        {/* Tooltip */}
+                        <div className="absolute bottom-full right-0 mb-2 hidden group-hover:block w-56 p-2.5 rounded-lg border bg-card shadow-lg z-20">
+                          <p className="text-xs font-medium mb-1">{getStateLabel(festival.state)}</p>
+                          <p className="text-xs text-muted-foreground leading-relaxed">
+                            {getStateDescription(festival.state)}
+                          </p>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 )
@@ -670,6 +802,20 @@ export default function FestivalsPage() {
         }}
         onCancel={() => setResetDialogOpen(false)}
       />
+
+      {/* Festival Editor Dialog */}
+      {editingFestival && (
+        <FestivalEditor
+          festivalId={editingFestival.id}
+          festivalName={editingFestival.name}
+          initialData={editingFestival.research_data}
+          currentState={editingFestival.state}
+          open={!!editingFestival}
+          onOpenChange={(open) => {
+            if (!open) setEditingFestival(null)
+          }}
+        />
+      )}
     </div>
   )
 }

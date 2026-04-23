@@ -90,10 +90,11 @@ export default function RefreshPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Refresh Pipeline</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold">Refresh Pipeline</h1>
         <Button
           onClick={() => triggerMutation.mutate()}
           disabled={triggerMutation.isPending}
+          size="sm"
         >
           <RefreshCw
             className={cn(

@@ -133,8 +133,6 @@ export function StateBadge({
     researching: { bg: "bg-blue-100", text: "text-blue-800" },
     researched: { bg: "bg-green-100", text: "text-green-700" },
     researched_partial: { bg: "bg-yellow-50", text: "text-yellow-700" },
-    update_in_progress: { bg: "bg-blue-100", text: "text-blue-800" },
-    update_complete: { bg: "bg-green-100", text: "text-green-700" },
     syncing: { bg: "bg-purple-100", text: "text-purple-700" },
     synced: { bg: "bg-green-100", text: "text-green-700" },
     validating: { bg: "bg-indigo-100", text: "text-indigo-700" },
