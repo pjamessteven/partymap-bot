@@ -342,6 +342,23 @@ EXA_API_KEY=your_key_here
 PARTYMAP_API_KEY=your_key_here
 ```
 
+## Testing
+
+Tests run automatically during the Docker build and in GitHub Actions CI.
+
+```bash
+# Unit tests (SQLite, fast)
+cd apps/api
+pytest tests/unit/ -v --cov=src --cov-report=term-missing
+
+# Integration tests (needs PostgreSQL + Redis)
+docker compose -f docker-compose.test.yml up --abort-on-container-exit
+
+# Tests also run inside the Docker build
+# Build fails if any test fails
+docker build -t partymap-api --target tester apps/api/
+```
+
 ## API Documentation
 
 When running locally, API documentation is available at:

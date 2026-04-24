@@ -1,13 +1,19 @@
 #!/bin/sh
 set -e
 
-echo "=========================================="
-echo "Running Database Migrations..."
-echo "=========================================="
+# Skip migrations for worker/scheduler containers
+if [ "$SKIP_MIGRATIONS" = "true" ]; then
+    echo "=========================================="
+    echo "Skipping migrations (SKIP_MIGRATIONS=true)"
+    echo "=========================================="
+else
+    echo "=========================================="
+    echo "Running Database Migrations..."
+    echo "=========================================="
 
-# Wait for database to be ready
-echo "Waiting for database..."
-python3 << 'EOF'
+    # Wait for database to be ready
+    echo "Waiting for database..."
+    python3 << 'EOF'
 import asyncio
 import os
 import sys
@@ -36,21 +42,22 @@ if not result:
     sys.exit(1)
 EOF
 
-if [ $? -ne 0 ]; then
-    echo "ERROR: Failed to connect to database"
-    exit 1
-fi
+    if [ $? -ne 0 ]; then
+        echo "ERROR: Failed to connect to database"
+        exit 1
+    fi
 
-# Run Alembic migrations
-echo ""
-echo "Running Alembic migrations..."
-cd /app
+    # Run Alembic migrations
+    echo ""
+    echo "Running Alembic migrations..."
+    cd /app
 
-if alembic upgrade head; then
-    echo "Migrations completed successfully!"
-else
-    echo "ERROR: Migrations failed"
-    exit 1
+    if alembic upgrade head; then
+        echo "Migrations completed successfully!"
+    else
+        echo "ERROR: Migrations failed"
+        exit 1
+    fi
 fi
 
 echo ""

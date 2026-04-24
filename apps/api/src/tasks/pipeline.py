@@ -1,7 +1,10 @@
 """Celery tasks for festival discovery pipeline."""
 
 import logging
+from datetime import datetime, timedelta
 from uuid import UUID
+
+from celery.exceptions import Retry
 
 from sqlalchemy import func, select
 
@@ -9,14 +12,20 @@ from src.agents.discovery import DiscoveryAgent
 from src.config import get_settings
 from src.core.database import SessionLocal
 from src.core.models import (
+    AgentDecision,
     CostLog,
     Festival,
     FestivalEventDate,
     FestivalState,
     StateTransition,
 )
+from src.core.job_tracker import JobTracker, JobType
 from src.core.schemas import ResearchFailure, ResearchResult
-from src.dashboard.settings_router import is_setting_enabled_sync
+from src.core.settings_utils import (
+    get_setting_value_sync,
+    is_auto_process_enabled_sync,
+    is_setting_enabled_sync,
+)
 from src.partymap.client import PartyMapClient
 from src.tasks.celery_app import celery_app
 from src.utils.utc_now import utc_now
@@ -88,7 +97,7 @@ def _save_cost_log(
 
 
 @celery_app.task(bind=True, max_retries=3)
-def discovery_pipeline(self, manual_query: str = None):
+def discovery_pipeline(self, manual_query: str = None, thread_id: str = None):
     """
     Run discovery agent.
 
@@ -109,6 +118,9 @@ def discovery_pipeline(self, manual_query: str = None):
     try:
         # Run async discovery
         discovered = asyncio.run(_discover_async())
+
+        total_discovered = len(discovered)
+        processed = 0
 
         # Save each discovered festival (sync)
         for d in discovered:
@@ -143,8 +155,17 @@ def discovery_pipeline(self, manual_query: str = None):
             # Queue for deduplication
             deduplication_check.delay(str(festival.id))
 
-        logger.info(f"Discovery complete: {len(discovered)} festivals found")
+            processed += 1
+            JobTracker.update_progress_sync(
+                JobType.DISCOVERY,
+                current=processed,
+                total=total_discovered,
+            )
 
+        logger.info(f"Discovery complete: {total_discovered} festivals found")
+
+    except Retry:
+        raise
     except Exception as e:
         session.rollback()
         logger.error(f"Discovery failed: {e}")
@@ -178,8 +199,6 @@ def deduplication_check(self, festival_id: str):
             return
 
         # Check if auto_process is enabled
-        from src.dashboard.settings_router import is_auto_process_enabled_sync
-
         auto_process = is_auto_process_enabled_sync(session)
 
         async def _check_duplicate():
@@ -197,13 +216,16 @@ def deduplication_check(self, festival_id: str):
 
         if result.is_duplicate:
             festival.is_duplicate = True
-            festival.existing_event_id = result.existing_event_id
+            festival.partymap_event_id = result.existing_event_id
             festival.is_new_event_date = result.is_new_event_date
             festival.date_confirmed = result.date_confirmed
+            festival.existing_event_data = result.existing_event_data
 
             if result.is_new_event_date:
                 # New date for existing - still need to research
                 festival.state = FestivalState.RESEARCHING
+                festival.workflow_type = "update"
+                festival.update_reasons = ["new_event_date"]
                 _log_state_transition(
                     session,
                     festival.id,
@@ -213,16 +235,21 @@ def deduplication_check(self, festival_id: str):
                 )
                 session.commit()
 
-                # Only auto-queue if auto_process is enabled
+                # Only auto-queue if auto_process AND auto_research_on_discover are enabled
                 if auto_process:
-                    research_pipeline.delay(festival_id)
-                    logger.info(f"Auto-queued research for new event date: {festival.name}")
+                    if is_setting_enabled_sync(session, "auto_research_on_discover"):
+                        research_pipeline.delay(festival_id)
+                        logger.info(f"Auto-queued research for new event date: {festival.name}")
+                    else:
+                        logger.info(f"Auto-research disabled, festival ready for manual research: {festival.name}")
                 else:
                     logger.info(f"Manual mode: {festival.name} ready for research (new event date)")
 
             elif not result.date_confirmed:
                 # Needs update
                 festival.state = FestivalState.RESEARCHING
+                festival.workflow_type = "update"
+                festival.update_reasons = ["missing_dates"]
                 _log_state_transition(
                     session,
                     festival.id,
@@ -258,6 +285,8 @@ def deduplication_check(self, festival_id: str):
         else:
             # New festival - queue for research
             festival.state = FestivalState.RESEARCHING
+            festival.workflow_type = "new"
+            festival.update_reasons = []
             _log_state_transition(
                 session,
                 festival.id,
@@ -302,14 +331,20 @@ def research_pipeline(self, festival_id: str):
             logger.error(f"Festival not found: {festival_id}")
             return
 
+        JobTracker.update_progress_sync(
+            JobType.RESEARCH,
+            current=1,
+            total=1,
+            festival_id=festival_id,
+            festival_name=festival.name,
+        )
+
         # Check if recently researched
         if festival.state == FestivalState.RESEARCHED:
             if festival.updated_at and festival.updated_at > utc_now() - timedelta(days=7):
                 logger.info(f"Recently researched, skipping: {festival.name}")
 
                 # Only auto-sync if auto_sync_on_research_success setting is enabled
-                from src.dashboard.settings_router import is_setting_enabled_sync
-
                 if is_setting_enabled_sync(session, "auto_sync_on_research_success"):
                     sync_pipeline.delay(festival_id)
                     logger.info(f"Auto-sync queued for recently researched festival: {festival.name}")
@@ -337,7 +372,6 @@ def research_pipeline(self, festival_id: str):
             from src.agents.research.state import ResearchState
 
             # Get budget from settings
-            from src.dashboard.settings_router import get_setting_value_sync
             from src.services.browser_service import BrowserService
             from src.services.exa_client import ExaClient
             from src.services.llm_client import LLMClient
@@ -363,6 +397,10 @@ def research_pipeline(self, festival_id: str):
                     source_url=festival.source_url,
                     discovered_data=festival.discovered_data,
                     budget_cents=budget_cents,
+                    workflow_type=festival.workflow_type or "new",
+                    partymap_event_id=festival.partymap_event_id,
+                    update_reasons=festival.update_reasons or [],
+                    existing_event_data=festival.existing_event_data,
                 )
 
                 # Run graph
@@ -385,10 +423,28 @@ def research_pipeline(self, festival_id: str):
                 error = result_state.get("error")
 
                 if final_result:
-                    # Successful research
-                    from src.core.schemas import FestivalData
+                    from src.core.schemas import FestivalData, ResearchFailure
                     festival_data = FestivalData(**final_result)
 
+                    # Check if this is a partial result (missing logo)
+                    if result_state.get("is_partial"):
+                        return ResearchResult(
+                            success=False,
+                            festival_data=festival_data,
+                            collected_data=result_state.get("collected_data", {}),
+                            cost_cents=total_cost,
+                            iterations=result_state.get("iteration", 0),
+                            failure=ResearchFailure(
+                                reason="logo_missing",
+                                message="Core info found but logo is missing",
+                                missing_fields=result_state.get("missing_fields", ["logo_url"]),
+                                completeness_score=0.7,
+                                cost_cents=total_cost,
+                                iterations=result_state.get("iteration", 0),
+                            ),
+                        )
+
+                    # Successful research
                     return ResearchResult(
                         success=True,
                         festival_data=festival_data,
@@ -440,8 +496,9 @@ def research_pipeline(self, festival_id: str):
             # Successful research with complete data
             festival_data = result.festival_data
 
-            # Save structured research result
-            festival.research_data = result.model_dump()
+            # Save festival data directly (not wrapped in ResearchResult)
+            # This ensures consumers can do FestivalData(**festival.research_data)
+            festival.research_data = result.festival_data.model_dump()
             festival.research_cost_cents = result.cost_cents
             festival.state = FestivalState.RESEARCHED
             festival.failure_reason = None
@@ -493,8 +550,6 @@ def research_pipeline(self, festival_id: str):
             session.commit()
 
             # Queue for sync only if auto_sync_on_research_success is enabled
-            from src.dashboard.settings_router import is_setting_enabled_sync
-
             if is_setting_enabled_sync(session, "auto_sync_on_research_success"):
                 sync_pipeline.delay(festival_id)
                 logger.info(f"Auto-sync queued for researched festival: {festival.name}")
@@ -505,8 +560,13 @@ def research_pipeline(self, festival_id: str):
             # Research failed with structured failure
             failure = result.failure
 
-            # Save structured failure result
-            festival.research_data = result.model_dump()
+            # Save festival data if available (for partial results), otherwise empty
+            # Store flat FestivalData format so consumers can use it directly
+            if result.festival_data:
+                festival.research_data = result.festival_data.model_dump()
+            else:
+                festival.research_data = result.collected_data or {}
+
             festival.research_cost_cents = result.cost_cents
             festival.failure_reason = failure.reason
             festival.failure_message = failure.message
@@ -560,6 +620,9 @@ def research_pipeline(self, festival_id: str):
             festival.failure_message = "Unexpected research result format"
             session.commit()
 
+    except Retry:
+        # Re-raise Celery Retry without modification (e.g., budget exceeded)
+        raise
     except Exception as e:
         session.rollback()
         logger.error(f"Unexpected error researching {festival_id}: {e}")
@@ -586,7 +649,7 @@ def research_pipeline(self, festival_id: str):
 
 
 @celery_app.task(bind=True, max_retries=3)
-def sync_pipeline(self, festival_id: str):
+def sync_pipeline(self, festival_id: str, force: bool = False):
     """
     Sync festival to PartyMap with pre-flight validation.
 
@@ -598,6 +661,10 @@ def sync_pipeline(self, festival_id: str):
     - Validates festival data before PartyMap sync
     - Sets state to VALIDATING -> VALIDATION_FAILED or SYNCING -> SYNCED
     - On sync error: classifies error, increments retry, quarantines if max retries reached
+
+    Args:
+        festival_id: The festival UUID to sync
+        force: If True, bypass validation (allows missing logo, etc.)
     """
     import asyncio
 
@@ -607,6 +674,14 @@ def sync_pipeline(self, festival_id: str):
         if not festival:
             logger.error(f"Festival not found: {festival_id}")
             return
+
+        JobTracker.update_progress_sync(
+            JobType.SYNC,
+            current=1,
+            total=1,
+            festival_id=festival_id,
+            festival_name=festival.name,
+        )
 
         if not festival.research_data:
             logger.error(f"No research data for {festival_id}")
@@ -619,7 +694,7 @@ def sync_pipeline(self, festival_id: str):
 
         festival_data = FestivalData(**festival.research_data)
         validator = PartyMapSyncValidator()
-        validation_result = validator.validate(festival_data)
+        validation_result = validator.validate(festival_data, allow_missing_logo=force)
 
         # Store validation results
         festival.validation_status = validation_result.status
@@ -627,7 +702,7 @@ def sync_pipeline(self, festival_id: str):
         festival.validation_warnings = validation_result.warnings
         festival.validation_checked_at = utc_now()
 
-        if validation_result.status == "invalid":
+        if validation_result.status == "invalid" and not force:
             festival.state = FestivalState.VALIDATION_FAILED
             _log_state_transition(
                 session,
@@ -644,7 +719,7 @@ def sync_pipeline(self, festival_id: str):
             )
             return
 
-        if validation_result.status == "needs_review":
+        if validation_result.status == "needs_review" and not force:
             festival.state = FestivalState.NEEDS_REVIEW
             _log_state_transition(
                 session,
@@ -660,10 +735,13 @@ def sync_pipeline(self, festival_id: str):
             )
             # In auto-process mode, continue to sync anyway
             # In manual mode, stop here and wait for human review
-            if not is_setting_enabled_sync(session, "auto_process"):
+            if not is_setting_enabled_sync(session, "auto_process_enabled"):
                 return
             # Auto-process: continue to sync with warning logged
             logger.info(f"Auto-process enabled, continuing sync for {festival.name}")
+
+        if force:
+            logger.info(f"Force sync enabled for {festival.name}, bypassing validation")
 
         # Mark as syncing
         old_state = festival.state
@@ -682,7 +760,7 @@ def sync_pipeline(self, festival_id: str):
 
             duplicate_check = DuplicateCheckResult(
                 is_duplicate=festival.is_duplicate,
-                existing_event_id=festival.existing_event_id,
+                existing_event_id=festival.partymap_event_id,
                 is_new_event_date=festival.is_new_event_date,
                 date_confirmed=festival.date_confirmed,
             )
@@ -714,6 +792,8 @@ def sync_pipeline(self, festival_id: str):
         session.commit()
         logger.info(f"Synced {festival.name}: {result}")
 
+    except Retry:
+        raise
     except Exception as e:
         session.rollback()
 
@@ -739,7 +819,6 @@ def sync_pipeline(self, festival_id: str):
         festival.last_retry_at = utc_now()
 
         # Check if we should quarantine
-        from src.core.models import FestivalState
         if festival.retry_count >= 5:
             festival.max_retries_reached = True
             festival.state = FestivalState.QUARANTINED
@@ -780,5 +859,47 @@ def sync_pipeline(self, festival_id: str):
                 )
 
         session.commit()
+    finally:
+        session.close()
+
+
+@celery_app.task(bind=True, max_retries=3)
+def run_sync_task(self, festival_id: str = None, force: bool = False, thread_id: str = None):
+    """
+    Run sync for a single festival or all RESEARCHED festivals.
+
+    Args:
+        festival_id: If provided, sync only this festival. Otherwise sync all RESEARCHED festivals.
+        force: If True, bypass validation
+        thread_id: Optional thread ID for streaming
+    """
+    session = SessionLocal()
+    try:
+        if festival_id:
+            # Sync single festival
+            sync_pipeline.delay(festival_id=festival_id, force=force)
+            return {"synced": 1, "message": f"Sync queued for festival {festival_id}"}
+        else:
+            # Sync all researched festivals
+            from sqlalchemy import select
+            result = session.execute(
+                select(Festival).where(Festival.state == FestivalState.RESEARCHED)
+            )
+            festivals = result.scalars().all()
+
+            total = len(festivals)
+            count = 0
+            for festival in festivals:
+                sync_pipeline.delay(festival_id=str(festival.id), force=force)
+                count += 1
+                JobTracker.update_progress_sync(
+                    JobType.SYNC,
+                    current=count,
+                    total=total,
+                    festival_id=str(festival.id),
+                    festival_name=festival.name,
+                )
+
+            return {"synced": count, "message": f"Sync queued for {count} festivals"}
     finally:
         session.close()

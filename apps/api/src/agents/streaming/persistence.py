@@ -232,3 +232,29 @@ class StreamPersistenceHandler(AsyncCallbackHandler):
             return json.loads(json.dumps(obj, default=str))
         except (TypeError, ValueError):
             return str(obj)
+
+    async def on_event(self, event: dict):
+        """Handle generic events from non-LangChain agents (e.g., discovery)."""
+        if self.db is None:
+            self.db = AsyncSessionLocal()
+
+        event_type = event.get("event", "custom")
+        event_data = event.get("data", {})
+
+        # Map discovery events to appropriate types
+        if event_type in ["start", "query", "search_start"]:
+            mapped_type = "chain_start"
+        elif event_type in ["complete", "search_complete"]:
+            mapped_type = "chain_end"
+        elif event_type == "festival_found":
+            mapped_type = "custom"
+        else:
+            mapped_type = "custom"
+
+        await self._save_event(
+            event_type=mapped_type,
+            event_data=event_data,
+        )
+
+        # Flush immediately for discovery events
+        await self._flush_buffer()

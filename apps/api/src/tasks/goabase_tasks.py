@@ -13,17 +13,19 @@ logger = logging.getLogger(__name__)
 
 
 @shared_task(bind=True, soft_time_limit=3600, time_limit=7200)
-def goabase_sync_task(self) -> Dict[str, Any]:
+def goabase_sync_task(self, thread_id: str = None) -> Dict[str, Any]:
     """
-    Celery task to sync all festivals from Goabase.
+    Celery task to sync all festivals from Goabase with streaming.
     
     Runs periodically (configurable: daily, weekly, monthly).
     Can be manually triggered from the UI.
+    Streams progress to the UI in real-time.
     
     Soft time limit: 1 hour (graceful stop)
     Hard time limit: 2 hours (force kill)
     """
     import asyncio
+    import uuid
 
     settings = get_settings()
 
@@ -36,15 +38,35 @@ def goabase_sync_task(self) -> Dict[str, Any]:
             "current_status": sync_manager.status.__dict__
         }
 
+    # Generate thread ID for this sync run if not provided
+    import uuid as uuid_module
+    if not thread_id:
+        thread_id = f"goabase_{uuid_module.uuid4().hex[:8]}"
+
     async def _sync():
-        async with GoabaseSync(settings, sync_manager) as sync:
-            return await sync.sync_all()
+        from src.agents.streaming.job_streamer import JobStreamer
+
+        async with JobStreamer("goabase", thread_id) as streamer:
+            await streamer.info("Starting Goabase sync...")
+            
+            async with GoabaseSync(settings, sync_manager, writer=streamer._emit) as sync:
+                result = await sync.sync_all()
+                
+                # Send completion event
+                await streamer.complete(
+                    total_found=result.get("total_found", 0),
+                    new_count=result.get("new_count", 0),
+                    update_count=result.get("update_count", 0),
+                    error_count=result.get("error_count", 0),
+                )
+                return result
 
     try:
-        logger.info("Starting Goabase sync task")
+        logger.info(f"Starting Goabase sync task: {thread_id}")
         result = asyncio.run(_sync())
         result["status"] = "success"
         result["task_id"] = self.request.id
+        result["thread_id"] = thread_id
         logger.info(f"Goabase sync task completed: {result}")
         return result
 
@@ -54,6 +76,7 @@ def goabase_sync_task(self) -> Dict[str, Any]:
         return {
             "status": "stopped",
             "reason": "Time limit exceeded",
+            "thread_id": thread_id,
             "current_status": sync_manager.status.__dict__
         }
 

@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     )
 
     # PartyMap API
-    partymap_api_key: str = Field(default="placeholder", alias="PARTYMAP_API_KEY")
+    partymap_api_key: str = Field(alias="PARTYMAP_API_KEY")
     partymap_base_url: str = Field(
         default="https://api.partymap.com/api", alias="PARTYMAP_BASE_URL"
     )
@@ -38,14 +38,17 @@ class Settings(BaseSettings):
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
 
     # OpenRouter (DeepSeek)
-    openrouter_api_key: str = Field(default="placeholder", alias="OPENROUTER_API_KEY")
+    openrouter_api_key: str = Field(alias="OPENROUTER_API_KEY")
     openrouter_base_url: str = Field(
         default="https://openrouter.ai/api/v1", alias="OPENROUTER_BASE_URL"
     )
     openrouter_model: str = Field(default="deepseek/deepseek-chat", alias="OPENROUTER_MODEL")
 
     # Exa Search
-    exa_api_key: str = Field(default="placeholder", alias="EXA_API_KEY")
+    exa_api_key: str = Field(alias="EXA_API_KEY")
+
+    # CORS
+    cors_origins: str = Field(default="*", alias="CORS_ORIGINS")
 
     # Goabase
     goabase_base_url: str = Field(

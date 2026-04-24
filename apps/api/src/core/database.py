@@ -17,20 +17,39 @@ _redis_client: redis.Redis | None = None
 _async_redis_client = None
 
 
+# Redis connection pool settings
+REDIS_POOL_SIZE = 20
+REDIS_POOL_TIMEOUT = 30
+
+
 def get_redis_client() -> redis.Redis:
-    """Get or create the shared sync Redis client."""
+    """Get or create the shared sync Redis client with connection pooling."""
     global _redis_client
     if _redis_client is None:
-        _redis_client = redis.from_url(settings.redis_url, decode_responses=True)
+        _redis_client = redis.from_url(
+            settings.redis_url,
+            decode_responses=True,
+            max_connections=REDIS_POOL_SIZE,
+            socket_connect_timeout=REDIS_POOL_TIMEOUT,
+            socket_keepalive=True,
+            health_check_interval=30,
+        )
     return _redis_client
 
 
 def get_async_redis_client():
-    """Get or create the shared async Redis client."""
+    """Get or create the shared async Redis client with connection pooling."""
     global _async_redis_client
     if _async_redis_client is None:
         from redis.asyncio import Redis as AsyncRedis
-        _async_redis_client = AsyncRedis.from_url(settings.redis_url, decode_responses=True)
+        _async_redis_client = AsyncRedis.from_url(
+            settings.redis_url,
+            decode_responses=True,
+            max_connections=REDIS_POOL_SIZE,
+            socket_connect_timeout=REDIS_POOL_TIMEOUT,
+            socket_keepalive=True,
+            health_check_interval=30,
+        )
     return _async_redis_client
 
 

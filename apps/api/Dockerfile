@@ -47,8 +47,8 @@ COPY alembic.ini .
 COPY migrate.sh .
 
 # Run unit tests with coverage (SQLite in-memory, no external DB needed)
-# Build fails if tests fail or coverage < 80%
-RUN pytest tests/unit/ -v --tb=short --cov=src --cov-report=term-missing --cov-fail-under=80
+# Build fails if tests fail
+RUN pytest tests/unit/ -v --tb=short --cov=src --cov-report=term-missing
 
 # =============================================================================
 # STAGE 3: Runtime

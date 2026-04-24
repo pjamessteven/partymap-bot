@@ -20,46 +20,38 @@ services:
       - LOG_LEVEL=debug
 
   worker:
-    # Use watchfiles for Celery worker hot reload
-    command: watchfiles --filter python "celery -A src.tasks.celery_app worker -l info -Q celery,discovery,dedup,research,sync,refresh -c 2" /app/src
+    # Celery worker without hot reload (watchfiles has argument parsing issues)
+    command: celery -A src.tasks.celery_app worker -l info -Q celery,discovery,dedup,research,sync,refresh -c 3
     volumes:
       - ./apps/api/src:/app/src:cached
       - ./apps/api/entrypoint.sh:/app/entrypoint.sh:cached
     environment:
       - DEBUG=true
       - LOG_LEVEL=debug
-    # Install watchfiles on startup
-    entrypoint: ["/bin/sh", "-c", "pip install watchfiles >/dev/null 2>&1 && /app/entrypoint.sh $@", "--"]
+      - SKIP_MIGRATIONS=true
 
   scheduler:
-    # Use watchfiles for Celery beat hot reload
-    command: watchfiles --filter python "celery -A src.tasks.celery_app beat -l info --scheduler src.tasks.scheduler:DatabaseScheduler" /app/src
+    # Celery beat without hot reload
+    command: celery -A src.tasks.celery_app beat -l info --scheduler src.tasks.scheduler:DatabaseScheduler
     volumes:
       - ./apps/api/src:/app/src:cached
       - ./apps/api/entrypoint.sh:/app/entrypoint.sh:cached
     environment:
       - DEBUG=true
       - LOG_LEVEL=debug
-    entrypoint: ["/bin/sh", "-c", "pip install watchfiles >/dev/null 2>&1 && /app/entrypoint.sh $@", "--"]
+      - SKIP_MIGRATIONS=true
 
   web:
     # Override build to use dev Dockerfile
     build:
       context: ./apps/web
       dockerfile: Dockerfile.dev
-    # Use Next.js dev mode with hot reload
-    # Install deps if needed, then start dev server
-    command: >
-      sh -c "
-        if [ ! -d node_modules ] || [ ! -f node_modules/.package-lock.json ]; then
-          echo 'Installing node_modules...'
-          npm install --legacy-peer-deps
-        fi
-        npm run dev
-      "
     volumes:
+      # Mount source code for hot reload
       - ./apps/web:/app
+      # Named volume for node_modules (persists build-time deps, not overwritten by bind mount)
       - web_node_modules:/app/node_modules
+      # Keep .next cache in a volume for faster rebuilds
       - web_next:/app/.next
     environment:
       - NODE_ENV=development

@@ -157,7 +157,7 @@ class DatabaseScheduler(Scheduler):
             if sched.day_of_week is not None:
                 # Weekly schedule - find next occurrence of this day
                 days_ahead = sched.day_of_week - now.weekday()
-                if days_ahead <= 0:  # Target day already happened this week
+                if days_ahead < 0:
                     days_ahead += 7
                 next_run = now + timedelta(days=days_ahead)
             else:
@@ -168,6 +168,13 @@ class DatabaseScheduler(Scheduler):
             next_run = next_run.replace(
                 hour=sched.hour, minute=sched.minute, second=0, microsecond=0
             )
+
+            # If the resulting time is in the past (same day but earlier time), bump to next occurrence
+            if next_run <= now:
+                if sched.day_of_week is not None:
+                    next_run += timedelta(days=7)
+                else:
+                    next_run += timedelta(days=1)
 
             sched.next_run_at = next_run
             session.commit()

@@ -43,8 +43,6 @@ class FestivalState(str, PyEnum):
     RESEARCHING = "researching"
     RESEARCHED = "researched"
     RESEARCHED_PARTIAL = "researched_partial"
-    UPDATE_IN_PROGRESS = "update_in_progress"
-    UPDATE_COMPLETE = "update_complete"
 
     # Sync phase
     SYNCING = "syncing"
@@ -149,7 +147,7 @@ class Festival(Base):
     purge_after: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # Timestamps
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, index=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=utc_now, onupdate=utc_now
     )
@@ -171,6 +169,37 @@ class Festival(Base):
         back_populates="festival", cascade="all, delete-orphan"
     )
 
+    def to_dict(self) -> dict:
+        """Convert festival to dictionary for API responses."""
+        return {
+            "id": str(self.id),
+            "name": self.name,
+            "source": self.source,
+            "source_url": self.source_url,
+            "state": self.state,
+            "is_duplicate": self.is_duplicate,
+            "is_new_event_date": self.is_new_event_date,
+            "date_confirmed": self.date_confirmed,
+            "partymap_event_id": str(self.partymap_event_id) if self.partymap_event_id else None,
+            "retry_count": self.retry_count,
+            "last_error": self.last_error,
+            "discovery_cost_cents": self.discovery_cost_cents,
+            "research_cost_cents": self.research_cost_cents,
+            "total_cost_cents": self.discovery_cost_cents + self.research_cost_cents,
+            "event_dates": [ed.to_dict() for ed in self.event_dates] if self.event_dates else [],
+            "discovered_data": self.discovered_data,
+            "research_data": self.research_data,
+            "current_thread_id": self.current_thread_id,
+            "failure_reason": self.failure_reason,
+            "failure_message": self.failure_message,
+            "research_completeness_score": self.research_completeness_score,
+            "validation_status": self.validation_status,
+            "validation_errors": self.validation_errors,
+            "validation_warnings": self.validation_warnings,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
 
 class FestivalEventDate(Base):
     """Individual event dates for festival series."""
@@ -178,7 +207,7 @@ class FestivalEventDate(Base):
     __tablename__ = "festival_event_dates"
 
     id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    festival_id: Mapped[UUID] = mapped_column(ForeignKey("festivals.id"), nullable=False)
+    festival_id: Mapped[UUID] = mapped_column(ForeignKey("festivals.id"), nullable=False, index=True)
 
     # Date/Location specific info
     start_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
@@ -211,6 +240,26 @@ class FestivalEventDate(Base):
     # Relationships
     festival: Mapped["Festival"] = relationship(back_populates="event_dates")
 
+    def to_dict(self) -> dict:
+        """Convert event date to dictionary for API responses."""
+        return {
+            "id": str(self.id),
+            "festival_id": str(self.festival_id),
+            "start_date": self.start_date.isoformat() if self.start_date else None,
+            "end_date": self.end_date.isoformat() if self.end_date else None,
+            "location_description": self.location_description,
+            "location_country": self.location_country,
+            "location_lat": self.location_lat,
+            "location_lng": self.location_lng,
+            "lineup": self.lineup,
+            "ticket_url": self.ticket_url,
+            "tickets": self.tickets,
+            "expected_size": self.expected_size,
+            "partymap_event_date_id": str(self.partymap_event_date_id) if self.partymap_event_date_id else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
 
 class DiscoveryQuery(Base):
     """Discovery query rotation tracking."""
@@ -241,7 +290,7 @@ class AgentDecision(Base):
     __tablename__ = "agent_decisions"
 
     id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    festival_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("festivals.id"), nullable=True)
+    festival_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("festivals.id"), nullable=True, index=True)
 
     # Link to new stream format if migrated
     thread_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
@@ -272,7 +321,7 @@ class StateTransition(Base):
     __tablename__ = "state_transitions"
 
     id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    festival_id: Mapped[UUID] = mapped_column(ForeignKey("festivals.id"), nullable=False)
+    festival_id: Mapped[UUID] = mapped_column(ForeignKey("festivals.id"), nullable=False, index=True)
 
     from_state: Mapped[str] = mapped_column(String(50), nullable=False)
     to_state: Mapped[str] = mapped_column(String(50), nullable=False)

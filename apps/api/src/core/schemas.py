@@ -44,9 +44,7 @@ class FestivalState(str, Enum):
     # Research phase
     RESEARCHING = "researching"
     RESEARCHED = "researched"
-    RESEARCHED_PARTIAL = "researched_partial"
-    UPDATE_IN_PROGRESS = "update_in_progress"
-    UPDATE_COMPLETE = "update_complete"
+    RESEARCHED_PARTIAL = "researched_partial"  # Core info found, logo missing
 
     # Sync phase
     SYNCING = "syncing"
@@ -61,6 +59,51 @@ class FestivalState(str, Enum):
     FAILED = "failed"
     SKIPPED = "skipped"
     NEEDS_REVIEW = "needs_review"
+
+
+class FestivalUpdateRequest(BaseModel):
+    """Request schema for manually updating festival research data.
+
+    Allows human-in-the-loop to edit festival data,
+    particularly for adding missing logos to RESEARCHED_PARTIAL festivals.
+    """
+
+    research_data: Dict[str, Any] = Field(
+        ...,
+        description="Complete or partial research data to update"
+    )
+    promote_to_researched: bool = Field(
+        default=False,
+        description="If true, promotes festival from RESEARCHED_PARTIAL to RESEARCHED after update"
+    )
+    reason: Optional[str] = Field(
+        default=None,
+        description="Reason for the manual update (for audit log)"
+    )
+
+    @field_validator("research_data")
+    @classmethod
+    def validate_research_data(cls, v):
+        """Ensure research_data contains valid FestivalData structure."""
+        if not v:
+            raise ValueError("research_data cannot be empty")
+        if not isinstance(v, dict):
+            raise ValueError("research_data must be an object")
+        # Name is the only truly required field for an update
+        if "name" not in v:
+            raise ValueError("research_data must contain 'name'")
+        return v
+
+
+class FestivalUpdateResponse(BaseModel):
+    """Response schema for festival update."""
+
+    festival_id: str = Field(..., description="ID of the updated festival")
+    message: str = Field(..., description="Human-readable success message")
+    previous_state: str = Field(..., description="State before the update")
+    new_state: str = Field(..., description="State after the update")
+    updated_fields: List[str] = Field(..., description="List of fields that were updated")
+    timestamp: str = Field(..., description="ISO timestamp of the update")
 
 
 class TicketInfo(BaseModel):
@@ -137,6 +180,9 @@ class FestivalData(BaseModel):
 
     # Event dates (EventDate objects)
     event_dates: List[EventDateData] = Field(default_factory=list)
+
+    # Lineup images (URLs to images containing lineup information)
+    lineup_images: List[str] = Field(default_factory=list)
 
     # Recurrence (defaults to yearly if is_recurring detected)
     rrule: Optional[RRuleData] = None
@@ -243,9 +289,10 @@ class FestivalData(BaseModel):
                                     "message": "Maximum price must be greater than or equal to minimum price"
                                 })
 
-        # Media validation
+        # Media validation - logo is REQUIRED for PartyMap sync
         if not self.logo_url:
-            warnings.append({"field": "logo_url", "message": "No logo image selected"})
+            errors.append({"field": "logo_url", "message": "Logo image is required for PartyMap sync"})
+            missing_fields.append("logo_url")
 
         if not self.media_items:
             warnings.append({"field": "media_items", "message": "No gallery images"})
@@ -257,8 +304,9 @@ class FestivalData(BaseModel):
             warnings.append({"field": "tags", "message": "Consider adding more tags for better discoverability"})
 
         # Calculate completeness score
-        required_fields = ["name", "description", "full_description", "event_dates"]
-        optional_fields = ["logo_url", "media_items", "tags", "youtube_url", "website_url"]
+        # Logo is now required, so include it in required fields
+        required_fields = ["name", "description", "full_description", "event_dates", "logo_url"]
+        optional_fields = ["media_items", "tags", "youtube_url", "website_url"]
 
         required_score = sum(1 for f in required_fields if f not in missing_fields) / len(required_fields)
         optional_score = sum(1 for f in optional_fields if getattr(self, f, None)) / len(optional_fields)
@@ -315,6 +363,7 @@ class ResearchedFestival(BaseModel):
     """Enriched festival data after research."""
 
     id: Optional[UUID] = None
+    discovered_id: Optional[UUID] = None  # Link back to the discovery that spawned this
     festival_data: FestivalData  # Split into Event + EventDate data
 
     # Deduplication info (set before research or after check)
@@ -324,7 +373,7 @@ class ResearchedFestival(BaseModel):
     date_confirmed: bool = True
 
     # PartyMap tracking
-    partymap_event_id: Optional[UUID] = None
+    partymap_event_id: Optional[int] = None
     partymap_status: Optional[str] = None
 
     # Cost tracking
@@ -366,13 +415,14 @@ class PartyMapAddEventDateRequest(BaseModel):
     """
     Request for POST /api/date/event/{event_id}
     Date/location specific info goes here.
+
+    Note: PartyMap API does NOT accept ticket_url; use tickets (structured) instead.
     """
 
     start: datetime
     end: Optional[datetime] = None
     description: Optional[str] = None  # Location description
     url: Optional[HttpUrl] = None
-    ticket_url: Optional[HttpUrl] = None
     size: Optional[int] = None
     artists: Optional[List[Dict[str, str]]] = None  # [{"name": "Artist"}]
     tickets: Optional[List[Dict[str, Any]]] = None
@@ -402,13 +452,14 @@ class PartyMapUpdateEventDateRequest(BaseModel):
     """
     Request for PUT /api/date/event/{event_id}/{date_id}
     Update specific EventDate info.
+
+    Note: PartyMap API does NOT accept ticket_url; use tickets (structured) instead.
     """
 
     start: Optional[datetime] = None
     end: Optional[datetime] = None
     description: Optional[str] = None
     url: Optional[HttpUrl] = None
-    ticket_url: Optional[HttpUrl] = None
     size: Optional[int] = None
     artists: Optional[List[Dict[str, str]]] = None
     tickets: Optional[List[Dict[str, Any]]] = None
@@ -423,6 +474,7 @@ class DuplicateCheckResult(BaseModel):
     date_confirmed: bool = True
     confidence: float = 0.0
     reason: str = ""
+    existing_event_data: Optional[dict] = None  # Cached PartyMap event data
 
 
 class AgentDecisionLog(BaseModel):

@@ -7,7 +7,7 @@ tag enhancement and setting events directly to RESEARCHED state.
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from sqlalchemy import select
 
@@ -84,6 +84,7 @@ class GoabaseSync:
     - Extracts lineup from description when performers field is empty
     - Sets events directly to RESEARCHED state (bypasses research workflow)
     - Simple URL-based deduplication with modified_date tracking
+    - Real-time streaming to UI
     """
 
     def __init__(
@@ -92,13 +93,32 @@ class GoabaseSync:
         manager: Optional[GoabaseSyncManager] = None,
         llm_client: Optional[LLMClient] = None,
         partymap_client: Optional[PartyMapClient] = None,
+        writer: Optional[Callable[[dict], None]] = None,
     ):
         self.settings = settings
         self.goabase: Optional[GoabaseClient] = None
         self.manager = manager or GoabaseSyncManager()
         self.llm = llm_client
         self.partymap = partymap_client
+        self.writer = writer
         self._available_tags: Optional[List[str]] = None
+
+    def _broadcast(self, event_type: str, data: dict):
+        """Broadcast event to writer if available."""
+        if self.writer:
+            event = {
+                "event": event_type,
+                "data": data,
+                "timestamp": datetime.now().isoformat(),
+            }
+            # Handle both sync and async writers
+            try:
+                import asyncio
+                result = self.writer(event)
+                if asyncio.iscoroutine(result):
+                    asyncio.create_task(result)
+            except Exception as e:
+                logger.warning(f"Failed to broadcast goabase event: {e}")
 
     async def __aenter__(self):
         """Async context manager entry."""
@@ -154,9 +174,13 @@ class GoabaseSync:
         try:
             # Step 1: Fetch party list from Goabase
             status.current_operation = "Fetching party list from Goabase API"
+            self._broadcast("info", {"message": "Fetching party list from Goabase API..."})
+            
             party_list = await self.goabase.get_party_list()
             status.total_found = len(party_list)
             logger.info(f"Fetched {len(party_list)} parties from Goabase")
+            
+            self._broadcast("info", {"message": f"Found {len(party_list)} parties from Goabase"})
 
             if status.stop_requested:
                 logger.info("Goabase sync stopped after fetch")
@@ -170,22 +194,41 @@ class GoabaseSync:
                     break
 
                 self.manager.update_progress(idx + 1, len(party_list), f"Processing {party.name}")
+                
+                # Broadcast progress every 5 items or on first/last
+                if idx % 5 == 0 or idx == len(party_list) - 1:
+                    self._broadcast("progress", {
+                        "current": idx + 1,
+                        "total": len(party_list),
+                        "percent": int(((idx + 1) / len(party_list)) * 100),
+                        "current_party": party.name,
+                    })
 
                 try:
                     await self._process_party(party)
                 except Exception as e:
                     logger.error(f"Failed to process Goabase party {party.name}: {e}")
                     status.error_count += 1
+                    self._broadcast("error", {"message": f"Failed to process {party.name}: {str(e)}"})
 
             logger.info(
                 f"Goabase sync complete: {status.new_count} new, "
                 f"{status.update_count} updates, {status.unchanged_count} unchanged, "
                 f"{status.error_count} errors"
             )
+            
+            self._broadcast("complete", {
+                "total_found": status.total_found,
+                "new_count": status.new_count,
+                "update_count": status.update_count,
+                "unchanged_count": status.unchanged_count,
+                "error_count": status.error_count,
+            })
 
         except Exception as e:
             logger.error(f"Goabase sync failed: {e}")
             status.error_count += 1
+            self._broadcast("error", {"message": f"Sync failed: {str(e)}"})
         finally:
             self.manager.mark_complete()
 
@@ -211,12 +254,22 @@ class GoabaseSync:
                 await self._create_new_festival(session, festival_data)
                 status.new_count += 1
                 logger.info(f"New Goabase festival: {festival_data.name}")
+                self._broadcast("festival_found", {
+                    "name": festival_data.name,
+                    "source_url": str(festival_data.source_url) if festival_data.source_url else None,
+                    "status": "new",
+                })
 
             elif self._needs_update(existing, festival_data):
                 # UPDATE needed
                 await self._mark_for_update(session, existing, festival_data)
                 status.update_count += 1
                 logger.info(f"Goabase update needed: {festival_data.name}")
+                self._broadcast("festival_found", {
+                    "name": festival_data.name,
+                    "source_url": str(festival_data.source_url) if festival_data.source_url else None,
+                    "status": "update",
+                })
 
             else:
                 # Unchanged
@@ -305,11 +358,6 @@ class GoabaseSync:
         # Enhance the festival data with tags and lineup
         festival_data = await self._enhance_festival_data(festival_data)
 
-        # Build location from event_dates
-        location = ""
-        if festival_data.event_dates and festival_data.event_dates[0].location_description:
-            location = festival_data.event_dates[0].location_description
-
         # Store discovered_data with goabase_modified
         discovered_data = dict(festival_data.discovered_data or {})
         if festival_data.source_modified:
@@ -336,7 +384,6 @@ class GoabaseSync:
             source="goabase",
             source_id=festival_data.discovered_data.get("party_id") if festival_data.discovered_data else None,
             source_url=str(festival_data.source_url) if festival_data.source_url else None,
-            location=location,
             state=FestivalState.RESEARCHED,  # Go directly to RESEARCHED state
             workflow_type="new",
             discovered_data=discovered_data,

@@ -50,9 +50,10 @@ Required fields to collect:
 - name: Festival name
 - start: Start date (ISO format)
 - location: Location description
+- logo_url: Festival logo/cover image (REQUIRED for PartyMap sync)
 
 Enhanced fields:
-- full_description, youtube_url, tags, logo_url, media_items, lineup_images, size, tickets, is_recurring
+- full_description, youtube_url, tags, media_items, lineup_images, size, tickets, is_recurring
 
 Be thorough - this is a NEW festival and needs complete data."""
 
@@ -91,6 +92,7 @@ Your strategy:
 
 Required fields:
 - name, start, location (verify these match existing event)
+- logo_url: Festival logo/cover image (REQUIRED for PartyMap sync)
 
 Focus on what's CHANGED or MISSING compared to the existing PartyMap event."""
 
@@ -365,14 +367,17 @@ async def evaluator_node(state: ResearchState, config: RunnableConfig) -> dict:
     ):
         missing.append("location")
 
-    # Enhanced optional fields
+    # Logo is now REQUIRED for full research completion
+    logo_missing = False
+    if not collected.get("logo"):
+        logo_missing = True
+
+    # Enhanced optional fields (excluding logo, which is now required)
     enhanced_missing = []
     if not collected.get("tags"):
         enhanced_missing.append("tags")
     if not collected.get("youtube_url"):
         enhanced_missing.append("youtube_url")
-    if not collected.get("logo"):
-        enhanced_missing.append("logo")
     if not collected.get("full_description"):
         enhanced_missing.append("full_description")
     if not collected.get("media_items"):
@@ -384,8 +389,8 @@ async def evaluator_node(state: ResearchState, config: RunnableConfig) -> dict:
     if not collected.get("description"):
         missing.append("description (optional)")
 
-    # Check if we have minimum required
-    has_minimum = bool(
+    # Check if we have minimum required (core info)
+    has_core_info = bool(
         collected.get("name")
         and (
             collected.get("start")
@@ -396,6 +401,10 @@ async def evaluator_node(state: ResearchState, config: RunnableConfig) -> dict:
             or any(ed.get("location_description") for ed in collected.get("event_dates", []))
         )
     )
+
+    # Check if we have ALL required fields including logo
+    has_logo = bool(collected.get("logo"))
+    has_minimum = has_core_info and has_logo
 
     # Emit evaluation
     writer = config.get("writer")
@@ -418,8 +427,115 @@ async def evaluator_node(state: ResearchState, config: RunnableConfig) -> dict:
             }
         )
 
+    # Check for partial completion (core info exists but logo missing)
+    if has_core_info and not has_logo and (not missing or all("(optional)" in m for m in missing)):
+        # Core info found but logo missing - partial completion
+        from dateutil import parser
+
+        from src.core.schemas import EventDateData, FestivalData, MediaItem, RRuleData
+
+        event_dates = []
+        if collected.get("event_dates"):
+            for ed in collected["event_dates"]:
+                event_dates.append(EventDateData(**ed))
+        else:
+            # Build from flat fields
+            start = None
+            end = None
+            if collected.get("start"):
+                try:
+                    start = parser.parse(collected["start"])
+                except (ValueError, TypeError):
+                    pass
+            if collected.get("end"):
+                try:
+                    end = parser.parse(collected["end"])
+                except (ValueError, TypeError):
+                    pass
+
+            # Build EventDateData with enhanced fields
+            event_date_data = EventDateData(
+                start=start,
+                end=end,
+                location_description=collected.get("location", ""),
+                lineup=collected.get("lineup", []),
+                size=collected.get("size"),
+                lineup_images=collected.get("lineup_images", []),
+            )
+
+            # Add tickets if extracted
+            if collected.get("tickets"):
+                from src.core.schemas import TicketInfo
+                tickets = []
+                for t in collected["tickets"]:
+                    tickets.append(TicketInfo(
+                        url=t.get("url"),
+                        description=t.get("description"),
+                        price_min=t.get("price_min"),
+                        price_max=t.get("price_max"),
+                        price_currency_code=t.get("price_currency_code")
+                    ))
+                event_date_data.tickets = tickets
+
+            event_dates.append(event_date_data)
+
+        # Build media_items from gallery (if any)
+        media_items = []
+        if collected.get("media_items"):
+            for item in collected["media_items"]:
+                if isinstance(item, dict) and item.get("url"):
+                    media_items.append(MediaItem(
+                        url=item["url"],
+                        caption=item.get("caption"),
+                        media_type=item.get("media_type", "gallery")
+                    ))
+
+        # No logo - this is a partial result
+        final_result = FestivalData(
+            name=collected.get("name", ""),
+            description=collected.get("description"),
+            full_description=collected.get("full_description"),
+            website_url=collected.get("website_url") or state.current_url,
+            youtube_url=collected.get("youtube_url"),
+            logo_url=None,  # Logo missing
+            media_items=media_items,
+            tags=collected.get("tags", []),
+            is_recurring=collected.get("is_recurring", False),
+            rrule=RRuleData(recurringType=3) if collected.get("is_recurring") else None,
+            event_dates=event_dates,
+            source="research_agent",
+            source_url=state.source_url,
+        )
+
+        # Include workflow information for pipeline
+        workflow_info = {
+            "workflow_type": state.workflow_type,
+            "partymap_event_id": state.partymap_event_id,
+            "update_reasons": state.update_reasons,
+        }
+
+        if writer:
+            workflow_msg = "update" if state.workflow_type == "update" else "new festival"
+            await writer(
+                {
+                    "type": "complete",
+                    "message": f"Research PARTIAL for {workflow_msg}! Core info found but logo missing. Use PUT /api/festivals/{{id}} to add logo, or force-sync to bypass.",
+                    "workflow_type": state.workflow_type,
+                    "is_partial": True,
+                    "missing_logo": True,
+                }
+            )
+
+        return {
+            "final_result": final_result.model_dump(),
+            "collected_data": collected,
+            "missing_fields": ["logo"],
+            "workflow_info": workflow_info,
+            "is_partial": True,  # Signal partial completion
+        }
+
     if has_minimum and (not missing or all("(optional)" in m for m in missing)):
-        # We have enough data - build final result
+        # We have ALL required data including logo - full completion
         from dateutil import parser
 
         from src.core.schemas import EventDateData, FestivalData, MediaItem, RRuleData

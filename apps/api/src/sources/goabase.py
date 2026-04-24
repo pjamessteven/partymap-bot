@@ -97,22 +97,23 @@ class GoabaseSource(SourceInterface):
             festival.discovered_id = discovered.id
 
             # Extract lineup from image if available and lineup is empty
-            if festival.lineup_images and (
-                not festival.event_dates or not festival.event_dates[0].lineup
+            festival_data = festival.festival_data
+            if festival_data.lineup_images and (
+                not festival_data.event_dates or not festival_data.event_dates[0].lineup
             ):
-                logger.info(f"Attempting lineup extraction from image for: {festival.name}")
+                logger.info(f"Attempting lineup extraction from image for: {festival_data.name}")
 
-                for image_url in festival.lineup_images:
+                for image_url in festival_data.lineup_images:
                     try:
                         artists = await self.lineup_extractor.extract_lineup(
-                            description=festival.full_description,
+                            description=festival_data.full_description,
                             image_url=str(image_url),
                         )
 
-                        if artists and festival.event_dates:
-                            festival.event_dates[0].lineup = artists
+                        if artists and festival_data.event_dates:
+                            festival_data.event_dates[0].lineup = artists
                             logger.info(
-                                f"Extracted {len(artists)} artists from image for: {festival.name}"
+                                f"Extracted {len(artists)} artists from image for: {festival_data.name}"
                             )
                             break
 

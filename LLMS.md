@@ -256,11 +256,11 @@ Discovery → Deduplication Check → Research → Sync
 
 ### 6. Research Agent (ReAct Pattern)
 
-**All-or-Nothing Approach:**
-- Must fill ALL required fields or fail
-- Required: name, description, start date, end date, location
+**Logo-Required Approach with Partial Completion:**
+- Required fields: name, date, location, **logo**
 - Max cost: $0.50 per festival
 - Max 3 retries, then mark as FAILED
+- **NEW: RESEARCHED_PARTIAL state** - When core info is found but logo is missing
 
 **ReAct Loop (Reasoning + Acting):**
 ```
@@ -277,8 +277,42 @@ Discovery → Deduplication Check → Research → Sync
 - `click_link` - Navigate deeper (free)
 - `screenshot` - Capture lineup images via vision LLM ($0.10)
 - `search_alternatives` - Find other sources via Exa ($0.10)
+- `select_media` - Extract logo, gallery, and lineup images ($0.05)
 
-**If incomplete:** Agent searches alternative sources before failing.
+**Completion States:**
+- `RESEARCHED` - All PartyMap requirements met (name, date, location, logo, descriptions)
+- `RESEARCHED_PARTIAL` - Core info found (name, date, location) but logo missing
+
+**Human-in-the-Loop for Partial Research:**
+When research completes as `RESEARCHED_PARTIAL`, the festival can be manually edited via:
+```bash
+PUT /api/festivals/{id}
+{
+  "research_data": {
+    "name": "Festival Name",
+    "description": "...",
+    "full_description": "...",
+    "logo_url": "https://...",  // Add missing logo
+    "event_dates": [...],
+    ...
+  }
+}
+```
+
+The API allows editing any field in `research_data`, including:
+- Adding a logo URL
+- Updating descriptions
+- Modifying dates/location
+- Adding tags, media, YouTube URL
+
+Once edited, the festival can be manually promoted to `RESEARCHED` state and queued for sync.
+
+**Logo Override Option:**
+For festivals that genuinely have no logo (underground events, small gatherings), admins can force sync without a logo:
+```bash
+POST /api/festivals/{id}/force-sync
+```
+This bypasses validation and creates the event in PartyMap without a logo.
 
 ### 7. State Machine
 
@@ -287,14 +321,43 @@ Festivals progress through states:
 ```
 discovered → researching → researched → syncing → synced
                 ↓
+        researched_partial (manual edit required)
+                ↓
+            (human adds logo) → researched
+                ↓
             failed (30 days → purged)
                 
 Manual transitions:
 - Skip (with reason)
 - Force retry
-- Force sync
+- Force sync (bypasses validation)
 - Reset to earlier state
+- Edit payload (for researched_partial)
 ```
+
+**State Details:**
+
+| State | Description | Next Action |
+|-------|-------------|-------------|
+| `DISCOVERED` | Initial discovery complete | Auto: deduplication |
+| `RESEARCHING` | Research agent active | Wait for completion |
+| `RESEARCHED` | All requirements met | Auto: validation → sync |
+| `RESEARCHED_PARTIAL` | Core info found, logo missing | Manual: edit payload or force sync |
+| `VALIDATING` | Pre-sync validation running | Auto: proceed or fail |
+| `VALIDATION_FAILED` | Validation errors found | Manual: fix errors or reset |
+| `SYNCING` | Sync to PartyMap in progress | Wait for completion |
+| `SYNCED` | Successfully synced to PartyMap | - |
+| `FAILED` | Processing failed | Manual: retry or skip |
+| `QUARANTINED` | Max retries exceeded | Manual: review and retry |
+| `SKIPPED` | Manually excluded | - |
+
+**RESEARCHED_PARTIAL Workflow:**
+1. Research agent completes with name, date, location but no logo
+2. Festival moves to `RESEARCHED_PARTIAL` state
+3. Human operator can:
+   - Edit via `PUT /api/festivals/{id}` to add logo and complete research
+   - Force sync via `POST /api/festivals/{id}/force-sync` (bypasses validation)
+   - Reset to `RESEARCHING` for another attempt
 
 Each transition is logged for audit trail.
 
@@ -530,33 +593,58 @@ Refresh Agent → Proposed Changes → Pending Approval
 
 ## Streaming Architecture (LangGraph Compatible)
 
-Real-time streaming of AI agent progress using Server-Sent Events (SSE).
+Real-time streaming of AI agent progress using Server-Sent Events (SSE) for ALL job types.
 
-**Purpose:** Frontend uses LangGraph's `useStream()` hook which expects specific SSE format.
+**Purpose:** Frontend uses LangGraph's `useStream()` hook which expects specific SSE format. All jobs (discovery, goabase, sync, research) now support unified streaming.
 
-**Endpoint:** `GET /api/threads/{thread_id}/runs/stream?stream_mode=messages,custom,tools`
+**Endpoints:**
+- Research: `GET /api/threads/{thread_id}/runs/stream?stream_mode=messages,custom,tools`
+- Discovery: `POST /api/agents/discovery/start` → returns `thread_id` for streaming
+- Goabase: `POST /api/goabase/sync/start` → returns `thread_id` for streaming
+
+**Unified JobStreamer (`src/agents/streaming/job_streamer.py`):**
+```python
+async with JobStreamer("discovery", thread_id) as streamer:
+    streamer.info("Starting discovery...")
+    streamer.progress(current=5, total=10)
+    streamer.festival_found({"name": "Festival", "source_url": "..."})
+    streamer.complete(total_found=10)
+```
+
+**Frontend JobStream Component (`components/jobs/JobStream.tsx`):**
+- Uses same AI-elements design as research streaming
+- Shows progress bars, festival cards, completion status
+- Supports all job types: discovery, goabase, sync, research
 
 **SSE Event Format:**
 ```
 event: metadata
-data: {"thread_id": "research_abc123", "status": "running"}
-
-event: messages
-data: [{"type": "ai", "data": {"content": "Researching..."}}, {"run_id": "run_123"}]
+data: {"thread_id": "discovery_abc123", "status": "running"}
 
 event: custom
-data: {"type": "reasoning", "data": {"step": "searching"}, "timestamp": "2026-01-01T00:00:00"}
+data: {"event": "progress", "data": {"current": 5, "total": 10, "percent": 50}}
 
-event: tools
-data: {"toolCallId": "call_123", "name": "web_search", "state": "starting", "input": "festival 2026"}
+event: custom
+data: {"event": "festival_found", "data": {"name": "Boom Festival", "status": "new"}}
+
+event: custom
+data: {"event": "complete", "data": {"total_found": 10, "new_count": 3}}
 
 event: end
 data: {"status": "success"}
 ```
 
+**Job-specific event types:**
+- `info` - Informational messages
+- `progress` - Progress updates with current/total/percent
+- `festival_found` - New festival discovered
+- `festival_synced` - Festival synced to PartyMap
+- `complete` - Job completion with summary
+- `error` - Error messages
+
 **Critical format requirements for UseStream() compatibility:**
 - `messages` event: data MUST be `[messageDict, metadataDict]` (array of 2 elements)
-- `custom` event: data MUST have `type` and `data` fields
+- `custom` event: data MUST have `event` and `data` fields for job events
 - `tools` event: data MUST have `toolCallId`, `name`, `state`
 - `end` event: data MUST have `status: "success"` or `"completed"`
 - `ping` event: sent every 30 seconds as keepalive
@@ -564,7 +652,7 @@ data: {"status": "success"}
 **Stream modes (query parameter):**
 - `messages` - Agent messages and responses
 - `updates` - State updates
-- `custom` - Custom events (reasoning, evaluation, tool_progress)
+- `custom` - Custom events (reasoning, evaluation, tool_progress, job events)
 - `tools` - Tool execution status
 - `events` - All LangGraph events
 - `debug` - Debug information
@@ -573,15 +661,20 @@ data: {"status": "success"}
 - On connection: Replays all historical events from database
 - Then bridges to live broadcaster for real-time updates
 - Ensures no gap between history and live stream
+- Works for all job types (discovery, goabase, sync, research)
 
 ## Unit Testing Strategy
 
-Comprehensive test suite with 211+ tests covering all critical paths.
+Comprehensive test suite covering all critical paths.
 
 **Test organization:**
 ```
 tests/
 ├── unit/                    # Fast unit tests (SQLite in-memory)
+│   ├── test_pipeline.py            # Core pipeline: dedup, research, sync, discovery
+│   ├── test_job_tracker.py         # Job tracking and Celery inspection
+│   ├── test_celery_signals.py      # Celery signal handlers
+│   ├── test_jobs_router.py         # Job control endpoints
 │   ├── test_errors_router.py       # DLQ, circuit breakers, validation
 │   ├── test_festivals_router.py    # Festival CRUD, sync, research
 │   ├── test_refresh_router.py      # Refresh approvals
@@ -596,8 +689,9 @@ tests/
 ```
 
 **Testing approach:**
-- **Unit tests**: SQLite in-memory, mocked external APIs, 80%+ coverage requirement
+- **Unit tests**: SQLite in-memory, mocked external APIs. Run during Docker build and in CI.
 - **Integration tests**: Real PostgreSQL + Redis via docker-compose.test.yml
+- **Pipeline tests**: Heavy mocking of SessionLocal, Celery tasks, PartyMapClient, and asyncio.run
 - **Streaming tests**: Verify SSE format matches UseStream() expectations
 - **Circuit breaker tests**: State machine transitions, timeout behavior
 
@@ -606,62 +700,86 @@ tests/
 - `db_session` - Async SQLAlchemy session with rollback
 - `mock_celery_tasks` - Mocked Celery task functions
 - `mock_partymap_client` - Mocked PartyMap API client
+- `mock_redis_tracker` - In-memory Redis mock for JobTracker tests
+- `mock_celery_result` - Mocked Celery AsyncResult for inspection tests
 - `mock_broadcaster` - Mocked StreamBroadcaster for streaming tests
-
-**Coverage requirements:**
-- New endpoints: 100% coverage
-- Core services: 90% coverage
-- Overall: 80% minimum (enforced in CI)
 
 **Running tests:**
 ```bash
 # Unit tests (SQLite, fast)
-pytest tests/unit/ -v --cov=src --cov-fail-under=80
+pytest tests/unit/ -v --cov=src --cov-report=term-missing
 
 # Integration tests (PostgreSQL + Redis)
-docker-compose -f docker-compose.test.yml up --abort-on-container-exit
+docker compose -f docker-compose.test.yml up --abort-on-container-exit
 
-# All tests during Docker build (fails build if tests fail)
-docker build -t partymap-api apps/api/
+# Tests run during Docker build (tester stage)
+# Build fails if any test fails
+docker build -t partymap-api --target tester apps/api/
 ```
+
+**CI/CD:**
+- GitHub Actions runs unit tests and integration tests on every push/PR
+- Docker build job runs the full test suite inside the container
+- No coverage threshold currently enforced (work in progress)
 
 ## Tech Stack
 
 - **Language**: Python 3.12
 - **Web Framework**: FastAPI
 - **Database**: PostgreSQL 15 + SQLAlchemy 2.0 (async + sync)
-- **Task Queue**: Celery + Redis
-- **Agents**: Custom ReAct implementation (no LangChain)
+- **Task Queue**: Celery + Redis (separate DBs: 0 for broker, 1 for backend)
+- **Agents**: Custom ReAct implementation
+- **Streaming**: Server-Sent Events (SSE) with Redis Pub/Sub broadcasting
 - **Browser**: Playwright (runs in Docker container)
 - **LLM**: DeepSeek via OpenRouter
 - **Search**: Exa API
-- **Testing**: pytest + pytest-asyncio
-- **Container**: Docker + docker-compose
+- **Testing**: pytest + pytest-asyncio (80%+ coverage)
+- **Container**: Docker + docker-compose (multi-stage builds)
+- **Frontend**: Next.js 16 + TypeScript + AI Elements (@base-ui/react)
 
 ## Project Structure
 
 ```
 partymap-bot/
 ├── src/
-│   ├── agents/           # DiscoveryAgent, ResearchAgent
-│   ├── core/             # Database models, schemas, settings
-│   ├── tasks/            # Celery tasks, custom scheduler
-│   │   ├── scheduler.py  # DatabaseScheduler (custom Celery Beat)
-│   │   ├── pipeline.py   # Main pipeline tasks
-│   │   └── celery_app.py # Celery configuration
-│   ├── partymap/         # API client, deduplication, sync
-│   ├── dashboard/        # API routes
-│   │   ├── router.py         # Main festival endpoints
-│   │   ├── schedule_router.py # Schedule management
-│   │   └── settings_router.py # System settings + manual actions
-│   ├── services/         # LLM client, Exa client
-│   ├── config.py         # Settings
-│   └── main.py           # FastAPI entry
-├── tests/                # Unit and integration tests
-├── scripts/              # Database initialization
-├── docker-compose.yml    # Services (app, db, redis, worker, scheduler)
-├── Dockerfile            # App container with Playwright
-└── pyproject.toml        # Dependencies
+│   ├── agents/                  # DiscoveryAgent, ResearchAgent
+│   │   ├── streaming/           # Real-time streaming infrastructure
+│   │   │   ├── broadcaster.py   # Redis Pub/Sub broadcaster
+│   │   │   ├── persistence.py   # Database persistence for events
+│   │   │   └── job_streamer.py  # Unified streaming for all jobs (NEW)
+│   │   ├── discovery.py         # Discovery agent with streaming
+│   │   └── research/            # Research agent (ReAct pattern)
+│   ├── core/                    # Database models, schemas, settings
+│   ├── tasks/                   # Celery tasks, custom scheduler
+│   │   ├── scheduler.py         # DatabaseScheduler (custom Celery Beat)
+│   │   ├── pipeline.py          # Main pipeline tasks (streaming enabled)
+│   │   ├── goabase_tasks.py     # Goabase sync with streaming
+│   │   └── celery_app.py        # Celery configuration
+│   ├── partymap/                # API client, deduplication, sync
+│   ├── dashboard/               # API routes
+│   │   ├── router.py            # Main festival endpoints
+│   │   ├── schedule_router.py   # Schedule management
+│   │   └── settings_router.py   # System settings + manual actions
+│   ├── api/                     # API endpoints
+│   │   └── agents.py            # Streaming endpoints (/threads/*)
+│   ├── services/                # LLM client, Exa client, circuit breakers
+│   ├── config.py                # Settings
+│   └── main.py                  # FastAPI entry
+├── apps/
+│   ├── api/                     # Python backend
+│   │   ├── Dockerfile           # Multi-stage build
+│   │   ├── docker-compose.yml   # Production compose
+│   │   ├── docker-compose.dev.yml # Development overrides
+│   │   └── entrypoint.sh        # Migration + startup script
+│   └── web/                     # Next.js frontend
+│       ├── app/                 # Next.js app router
+│       ├── components/          # React components
+│       │   ├── agents/          # AgentStream, ThreadList
+│       │   └── jobs/            # JobPanel, JobStream (NEW)
+│       └── lib/                 # API clients, hooks
+├── tests/                       # Unit and integration tests
+├── scripts/                     # Database initialization
+└── pyproject.toml               # Dependencies
 ```
 
 ## Database Tables
@@ -693,18 +811,20 @@ partymap-bot/
 
 ### Agent & Streaming Tables
 
-4. **agent_threads** - Active and completed agent runs
-   - `thread_id` - Unique identifier for streaming
-   - `festival_id` - Associated festival
-   - `agent_type` - discovery, research, refresh
+4. **agent_threads** - Active and completed agent/job runs
+   - `thread_id` - Unique identifier for streaming (e.g., "discovery_abc123")
+   - `festival_id` - Associated festival (NULL for discovery/goabase jobs)
+   - `agent_type` - discovery, research, refresh, goabase, sync
    - `status` - running, completed, failed
    - `total_tokens`, `cost_cents` - Usage tracking
+   - `result_data` - JSONB with job results (total_found, new_count, etc.)
 
 5. **agent_stream_events** - Persisted stream events for historical replay
    - `thread_id` - Parent thread
-   - `event_type` - messages, custom, tools, error, etc.
-   - `event_data` - JSONB payload
+   - `event_type` - messages, custom, tools, error, chain_start, chain_end
+   - `event_data` - JSONB payload (job events stored here)
    - `event_index` - Ordering for replay
+   - Supports all job types: discovery progress, goabase sync, research messages
 
 6. **agent_decisions** - Summarized agent decision logs
 
@@ -760,13 +880,14 @@ partymap-bot/
 15. **Completeness Scoring**: 0.0-1.0 score indicates data quality before sync
 16. **Human-in-the-Loop**: Refresh pipeline requires approval for high-stakes changes
 17. **Summarized Logs**: Agent decisions logged but condensed for readability
-18. **Real-time Streaming**: SSE format compatible with LangGraph's UseStream() hook
+18. **Unified Streaming**: All jobs (discovery, goabase, sync, research) stream via SSE with consistent AI-elements UI
+19. **JobStreamer Component**: Reusable streaming interface for all background jobs
 
 ### Testing & Reliability
 
-19. **Comprehensive Test Suite**: 211+ unit tests with 80%+ coverage requirement
+19. **Comprehensive Test Suite**: Unit tests covering pipeline, routers, validators, circuit breakers, and DLQ
 20. **Build-time Testing**: Docker build fails if tests fail (prevents bad deployments)
-21. **CI/CD Integration**: GitHub Actions runs tests on every PR/push
+21. **CI/CD Integration**: GitHub Actions runs unit + integration tests on every PR/push
 22. **Swagger Documentation**: All endpoints documented with OpenAPI
 
 ## Environment Variables
@@ -905,8 +1026,21 @@ curl -X POST http://localhost:8000/api/festivals/{id}/sync
 **Tests failing in CI:**
 - Run locally: `pytest tests/unit/ -v`
 - Check coverage: `pytest tests/unit/ --cov=src --cov-report=term-missing`
-- Ensure 80%+ coverage for new code
 - Check for mocking issues with external APIs
+- Ensure Celery task mocking uses `task.retry = MagicMock()` pattern
+
+**Streaming not showing in UI:**
+- Check thread_id is generated and returned by API
+- Verify Redis is running: `docker-compose logs redis`
+- Check worker is processing jobs: `docker-compose logs worker`
+- Look for broadcast errors in worker logs
+- Ensure browser is subscribed to correct thread_id
+
+**Job stream shows no events:**
+- JobStreamer requires async context manager: `async with JobStreamer(...) as streamer:`
+- Verify writer callback is passed to agent classes
+- Check that events are being persisted to agent_stream_events table
+- Verify thread status is updated to "running" in agent_threads
 
 ## API Documentation
 

@@ -95,19 +95,26 @@ class PartyMapClient:
 
             # Update the last request time
             await redis.set(_PARTYMAP_RATE_LIMIT_KEY, utc_now().timestamp())
-        except Exception as e:
+        except (ConnectionError, TimeoutError, OSError) as e:
             # If Redis fails, fall back to simple delay to be safe
             logger.warning(f"Redis rate limiting failed, using fallback: {e}")
             await asyncio.sleep(min_interval)
 
-    @circuit_breaker("partymap", failure_threshold=5, recovery_timeout=30.0)
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
         retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.NetworkError)),
+        reraise=True,
     )
+    async def _raw_request(self, method: str, url: str, **kwargs) -> httpx.Response:
+        """Make raw HTTP request with tenacity retry on 5xx/network errors."""
+        response = await self.client.request(method, url, **kwargs)
+        response.raise_for_status()
+        return response
+
+    @circuit_breaker("partymap", failure_threshold=5, recovery_timeout=30.0)
     async def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
-        """Make rate-limited HTTP request with retries."""
+        """Make rate-limited HTTP request with retries and error conversion."""
         await self._rate_limit()
 
         # Fix double slash issue
@@ -124,15 +131,17 @@ class PartyMapClient:
         logger.debug(f"PartyMap API request: {method} {url} - Headers: {debug_headers}")
 
         try:
-            response = await self.client.request(method, url, **kwargs)
-            response.raise_for_status()
-            return response
+            return await self._raw_request(method, url, **kwargs)
         except httpx.HTTPStatusError as e:
             logger.error(f"PartyMap API error: {e.response.status_code} - {e.response.text}")
+            try:
+                error_body = e.response.json() if e.response.content else None
+            except Exception:
+                error_body = {"raw": e.response.text}
             raise PartyMapAPIError(
                 f"API error: {e.response.status_code}",
                 status_code=e.response.status_code,
-                response=e.response.json() if e.response.content else None,
+                response=error_body,
             )
 
     # ==================== Event Operations ====================
@@ -187,20 +196,10 @@ class PartyMapClient:
 
         # Add first event_date data
         if event_date:
-            payload["date_time"] = {
-                "start": event_date.start.isoformat(),
-                "end": event_date.end.isoformat() if event_date.end else None,
-            }
+            payload["date_time"] = {"start": event_date.start.isoformat()}
+            if event_date.end:
+                payload["date_time"]["end"] = event_date.end.isoformat()
             payload["location"] = {"description": event_date.location_description}
-
-            # Ticket URL (use ticket_url or first ticket's URL)
-            ticket_url = None
-            if event_date.ticket_url:
-                ticket_url = str(event_date.ticket_url)
-            elif event_date.tickets and event_date.tickets[0].url:
-                ticket_url = str(event_date.tickets[0].url)
-            if ticket_url:
-                payload["ticket_url"] = ticket_url
 
             # Lineup artists
             if event_date.lineup:
@@ -337,23 +336,15 @@ class PartyMapClient:
     def _event_date_to_payload(self, event_date: EventDateData, source_url: str = None) -> dict:
         """Convert EventDateData to PartyMap API payload."""
         payload = {
-            "date_time": {
-                "start": event_date.start.isoformat(),
-                "end": event_date.end.isoformat() if event_date.end else None,
-            },
+            "date_time": {"start": event_date.start.isoformat()},
             "location": {"description": event_date.location_description},
         }
+        if event_date.end:
+            payload["date_time"]["end"] = event_date.end.isoformat()
 
         # Add URL (source_url for this date)
         if event_date.source_url:
             payload["url"] = event_date.source_url
-
-        # Add ticket URL (from ticket_url or first ticket)
-        ticket_url = getattr(event_date, 'ticket_url', None)
-        if ticket_url:
-            payload["ticket_url"] = str(ticket_url)
-        elif event_date.tickets and event_date.tickets[0].url:
-            payload["ticket_url"] = str(event_date.tickets[0].url)
 
         # Add size (capacity/attendance)
         size = getattr(event_date, 'size', None) or getattr(event_date, 'expected_size', None)
@@ -402,7 +393,7 @@ class PartyMapClient:
             response = await self._request(
                 "GET",
                 "/api/event/",
-                params={"search": query},
+                params={"search": query, "per_page": limit},
             )
             data = response.json()
             # Handle both { "items": [...] } and direct array
@@ -492,7 +483,13 @@ class PartyMapClient:
             if festival_data.logo_url:
                 payload["logo"] = {"url": str(festival_data.logo_url)}
             if festival_data.media_items:
-                payload["media_items"] = festival_data.media_items
+                payload["media_items"] = [
+                    {
+                        "url": str(m.url),
+                        "caption": m.caption or f"Photo from {festival_data.source_url or 'festival website'}"
+                    }
+                    for m in festival_data.media_items
+                ]
 
             await self._request("PUT", f"/api/event/{event_id}", json=payload)
             logger.info(f"Updated PartyMap event {event_id}: {festival_data.name}")
@@ -615,6 +612,7 @@ class PartyMapClient:
                         date_confirmed=True,
                         confidence=best_score,
                         reason="Existing event series, new date/location",
+                        existing_event_data=best_match,
                     )
                 else:
                     # Same date, check if needs update
@@ -630,16 +628,18 @@ class PartyMapClient:
                         confidence=best_score,
                         reason="Existing event and date"
                         + (" (needs update)" if not date_confirmed else ""),
+                        existing_event_data=best_match,
                     )
 
             # No event date to compare, assume general match
             return DuplicateCheckResult(
                 is_duplicate=True,
-                existing_event_id=existing_uuid,
+                existing_event_id=existing_event_id,
                 is_new_event_date=False,
                 date_confirmed=True,
                 confidence=best_score,
                 reason="Similar name and location found",
+                existing_event_data=best_match,
             )
 
         except Exception as e:
@@ -653,6 +653,9 @@ class PartyMapClient:
         n1 = name1.lower().strip()
         n2 = name2.lower().strip()
 
+        if not n1 or not n2:
+            return 0.0
+
         if n1 == n2:
             return 1.0
 
@@ -661,9 +664,6 @@ class PartyMapClient:
 
         words1 = set(n1.split())
         words2 = set(n2.split())
-
-        if not words1 or not words2:
-            return 0.0
 
         intersection = words1 & words2
         union = words1 | words2
@@ -740,7 +740,7 @@ class PartyMapClient:
                 if abs((existing_start - new_start).days) < 2:
                     # Same date, check completeness
                     lineup = existing.get("artists", [])
-                    has_tickets = existing.get("ticket_url") or existing.get("tickets")
+                    has_tickets = existing.get("tickets")
 
                     # Consider confirmed if has lineup AND tickets
                     if lineup and has_tickets:
@@ -1060,13 +1060,12 @@ class PartyMapClient:
         """
         try:
             payload = {
-                "date_time": {
-                    "start": event_date.start.isoformat(),
-                    "end": event_date.end.isoformat() if event_date.end else None,
-                },
+                "date_time": {"start": event_date.start.isoformat()},
                 "location": {"description": event_date.location_description},
                 "message": message,
             }
+            if event_date.end:
+                payload["date_time"]["end"] = event_date.end.isoformat()
 
             # Add optional fields
             if event_date.lineup:

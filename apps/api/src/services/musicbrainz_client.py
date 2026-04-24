@@ -147,7 +147,7 @@ class MusicBrainzClient:
 
             # Update the last request time
             await redis.set(_MUSICBRAINZ_RATE_LIMIT_KEY, utc_now().timestamp())
-        except Exception as e:
+        except (ConnectionError, TimeoutError, OSError) as e:
             # If Redis fails, fall back to simple delay to be safe
             logger.warning(f"Redis rate limiting failed, using fallback: {e}")
             await asyncio.sleep(self.RATE_LIMIT_DELAY)

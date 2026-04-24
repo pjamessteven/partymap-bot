@@ -81,6 +81,35 @@ async def start_research_agent(
     }
 
 
+@router.post("/agents/discovery/start")
+async def start_discovery_agent(
+    query: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Start a discovery agent to find new festivals.
+    
+    Args:
+        query: Optional manual search query. If not provided, uses query rotation.
+    
+    Returns a thread_id that can be used to stream progress via WebSocket.
+    """
+    from src.tasks.pipeline import discovery_pipeline
+
+    # Generate thread ID
+    thread_id = f"discovery_{uuid.uuid4().hex[:8]}"
+
+    # Trigger Celery task with thread_id
+    task = discovery_pipeline.delay(manual_query=query, thread_id=thread_id)
+
+    return {
+        "thread_id": thread_id,
+        "task_id": task.id,
+        "status": "started",
+        "query": query,
+    }
+
+
 async def _run_research_graph(
     thread_id: str,
     festival_id: uuid.UUID,
@@ -505,6 +534,18 @@ def _convert_to_langgraph_event(event: AgentStreamEvent, modes: set) -> Optional
                 "timestamp": event.timestamp.isoformat() if event.timestamp else None,
             }
         }
+    
+    # Job-specific events (discovery, goabase, sync)
+    # These are stored as "custom" type with event name in event_data
+    if event.event_type == "custom" and "custom" in modes:
+        return {
+            "event": "custom",
+            "data": {
+                "event": event.event_data.get("event", "custom"),
+                "data": event.event_data.get("data", {}),
+                "timestamp": event.timestamp.isoformat() if event.timestamp else None,
+            }
+        }
 
     # Chain lifecycle → metadata
     if event.event_type in ("chain_start", "chain_end"):
@@ -539,6 +580,19 @@ def _convert_live_event_to_langgraph(live_data: dict, modes: set) -> Optional[di
         return {"event": "tools", "data": data}
     if event_name in ("end", "error", "metadata"):
         return live_data  # Pass through lifecycle events
+    
+    # Handle job-specific events (discovery, goabase, sync)
+    # These are wrapped as "custom" events for the frontend
+    if event_name in ("info", "progress", "festival_found", "festival_synced", "complete"):
+        if "custom" in modes:
+            return {
+                "event": "custom",
+                "data": {
+                    "event": event_name,
+                    "data": data,
+                    "timestamp": live_data.get("timestamp"),
+                }
+            }
 
     return None
 

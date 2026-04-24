@@ -12,7 +12,7 @@ from src.core.database import get_db
 from src.core.job_activity import JobActivityLogger
 from src.core.job_tracker import JobTracker, JobType
 from src.core.models import PipelineSchedule
-from src.tasks.celery_app import discovery_pipeline, research_pipeline, sync_pipeline
+from src.tasks.celery_app import discovery_pipeline, research_pipeline, run_sync_task
 from src.tasks.goabase_tasks import goabase_sync_task
 from src.utils.utc_now import utc_now
 
@@ -54,8 +54,8 @@ async def broadcast_job_update(job_type: str, data: dict):
 async def get_jobs_status(
     db: AsyncSession = Depends(get_db),
 ):
-    """Get status of all jobs with activity summary."""
-    statuses = JobTracker.get_all_status()
+    """Get status of all jobs synced with Celery ground truth."""
+    statuses = JobTracker.get_all_status_synced()
 
     # Add processing festivals info
     for job_type in statuses:
@@ -110,10 +110,15 @@ async def start_discovery_job(
     query: Optional[str] = None,
 ):
     """Start discovery job."""
-    if JobTracker.is_running(JobType.DISCOVERY):
+    task = discovery_pipeline.delay(manual_query=query)
+    started = await JobTracker.try_start_job(JobType.DISCOVERY, task.id)
+    if not started:
+        # Revoke the task we just created since the job is already running
+        from src.tasks.celery_app import celery_app
+        celery_app.control.revoke(task.id, terminate=True, signal="SIGTERM")
         raise HTTPException(status_code=400, detail="Discovery already running")
 
-    task = discovery_pipeline.delay(manual_query=query)
+    await broadcast_job_update("discovery", JobTracker.get_status(JobType.DISCOVERY))
     return {"message": "Discovery started", "task_id": task.id, "query": query}
 
 
@@ -123,6 +128,7 @@ async def stop_discovery_job():
     if not JobTracker.is_running(JobType.DISCOVERY):
         raise HTTPException(status_code=400, detail="Discovery not running")
 
+    JobTracker.revoke_task(JobType.DISCOVERY)
     success = await JobTracker.stop_job(JobType.DISCOVERY)
     await broadcast_job_update("discovery", JobTracker.get_status(JobType.DISCOVERY))
     return {"message": "Discovery stopped", "success": success}
@@ -131,11 +137,13 @@ async def stop_discovery_job():
 @router.post("/jobs/goabase/start")
 async def start_goabase_job():
     """Start Goabase sync job."""
-    if JobTracker.is_running(JobType.GOABASE_SYNC):
+    task = goabase_sync_task.delay()
+    started = await JobTracker.try_start_job(JobType.GOABASE_SYNC, task.id)
+    if not started:
+        from src.tasks.celery_app import celery_app
+        celery_app.control.revoke(task.id, terminate=True, signal="SIGTERM")
         raise HTTPException(status_code=400, detail="Goabase sync already running")
 
-    task = goabase_sync_task.delay()
-    await JobTracker.start_job(JobType.GOABASE_SYNC, task.id)
     await broadcast_job_update("goabase_sync", JobTracker.get_status(JobType.GOABASE_SYNC))
     return {"message": "Goabase sync started", "task_id": task.id}
 
@@ -146,19 +154,63 @@ async def stop_goabase_job():
     if not JobTracker.is_running(JobType.GOABASE_SYNC):
         raise HTTPException(status_code=400, detail="Goabase sync not running")
 
+    JobTracker.revoke_task(JobType.GOABASE_SYNC)
     success = await JobTracker.stop_job(JobType.GOABASE_SYNC)
     await broadcast_job_update("goabase_sync", JobTracker.get_status(JobType.GOABASE_SYNC))
     return {"message": "Goabase sync stopped", "success": success}
 
 
 @router.post("/jobs/research/start")
-async def start_research_job():
-    """Start research job for all researching festivals."""
-    if JobTracker.is_running(JobType.RESEARCH):
+async def start_research_job(
+    db: AsyncSession = Depends(get_db),
+):
+    """Start research job for all festivals needing research."""
+    # Acquire lock atomically FIRST to prevent duplicate batches
+    import uuid
+    task_id = f"research_batch_{uuid.uuid4().hex[:8]}"
+    started = await JobTracker.try_start_job(
+        JobType.RESEARCH,
+        task_id,
+    )
+    if not started:
         raise HTTPException(status_code=400, detail="Research already running")
 
-    task = research_pipeline.delay()
-    return {"message": "Research job started", "task_id": task.id}
+    from sqlalchemy import or_, select
+    from src.core.models import Festival, FestivalState
+
+    result = await db.execute(
+        select(Festival).where(
+            or_(
+                Festival.state == FestivalState.RESEARCHING.value,
+                Festival.state == FestivalState.RESEARCHED_PARTIAL.value,
+                Festival.state == FestivalState.FAILED.value,
+                Festival.state == FestivalState.VALIDATION_FAILED.value,
+            )
+        ).with_for_update()
+    )
+    festivals = result.scalars().all()
+
+    if not festivals:
+        # Release the lock since there's nothing to do
+        await JobTracker.stop_job(JobType.RESEARCH)
+        return {"message": "No festivals need research", "task_id": None, "queued": 0}
+
+    # Update tracker with actual total
+    await JobTracker.update_progress(JobType.RESEARCH, current=0, total=len(festivals))
+
+    # Queue research for each festival
+    for festival in festivals:
+        festival.state = FestivalState.RESEARCHING.value
+        research_pipeline.delay(festival_id=str(festival.id))
+
+    await db.commit()
+    await broadcast_job_update("research", JobTracker.get_status(JobType.RESEARCH))
+
+    return {
+        "message": f"Research queued for {len(festivals)} festivals",
+        "task_id": task_id,
+        "queued": len(festivals),
+    }
 
 
 @router.post("/jobs/research/stop")
@@ -167,6 +219,7 @@ async def stop_research_job():
     if not JobTracker.is_running(JobType.RESEARCH):
         raise HTTPException(status_code=400, detail="Research not running")
 
+    JobTracker.revoke_task(JobType.RESEARCH)
     success = await JobTracker.stop_job(JobType.RESEARCH)
     await broadcast_job_update("research", JobTracker.get_status(JobType.RESEARCH))
     return {"message": "Research stopped", "success": success}
@@ -174,12 +227,30 @@ async def stop_research_job():
 
 @router.post("/jobs/sync/start")
 async def start_sync_job():
-    """Start sync job for all researched festivals."""
-    if JobTracker.is_running(JobType.SYNC):
+    """Start sync job for all researched festivals.
+
+    Returns immediately with task ID and thread_id. Stream progress via /threads/{thread_id}/runs/stream.
+    """
+    # Generate thread ID for streaming
+    import uuid
+    thread_id = f"sync_{uuid.uuid4().hex[:8]}"
+
+    # Trigger Celery task with thread_id
+    task = run_sync_task.delay(thread_id=thread_id)
+    started = await JobTracker.try_start_job(JobType.SYNC, task.id)
+    if not started:
+        from src.tasks.celery_app import celery_app
+        celery_app.control.revoke(task.id, terminate=True, signal="SIGTERM")
         raise HTTPException(status_code=400, detail="Sync already running")
 
-    task = sync_pipeline.delay()
-    return {"message": "Sync job started", "task_id": task.id}
+    await broadcast_job_update("sync", JobTracker.get_status(JobType.SYNC))
+
+    return {
+        "status": "started",
+        "task_id": task.id,
+        "thread_id": thread_id,
+        "message": "Sync job started. Stream progress via /threads/{thread_id}/runs/stream"
+    }
 
 
 @router.post("/jobs/sync/stop")
@@ -188,6 +259,7 @@ async def stop_sync_job():
     if not JobTracker.is_running(JobType.SYNC):
         raise HTTPException(status_code=400, detail="Sync not running")
 
+    JobTracker.revoke_task(JobType.SYNC)
     success = await JobTracker.stop_job(JobType.SYNC)
     await broadcast_job_update("sync", JobTracker.get_status(JobType.SYNC))
     return {"message": "Sync stopped", "success": success}
@@ -212,7 +284,32 @@ async def start_jobs_bulk(
             })
             continue
 
-        if JobTracker.is_running(job_type):
+        # Start the job via Celery task
+        from src.tasks.goabase_tasks import goabase_sync_task
+        from src.tasks.pipeline import discovery_pipeline, research_pipeline, run_sync_task
+
+        task_map = {
+            JobType.DISCOVERY: discovery_pipeline,
+            JobType.RESEARCH: research_pipeline,
+            JobType.SYNC: run_sync_task,
+            JobType.GOABASE_SYNC: goabase_sync_task,
+        }
+
+        task = task_map.get(job_type)
+        if not task:
+            results.append({
+                "job_type": job_type_str,
+                "success": False,
+                "error": "Task not found",
+            })
+            continue
+
+        celery_task = task.delay()
+        started = await JobTracker.try_start_job(job_type, celery_task.id)
+        if not started:
+            # Revoke the task we just created
+            from src.tasks.celery_app import celery_app
+            celery_app.control.revoke(celery_task.id, terminate=True, signal="SIGTERM")
             results.append({
                 "job_type": job_type_str,
                 "success": False,
@@ -220,38 +317,13 @@ async def start_jobs_bulk(
             })
             continue
 
-        # Start the job via Celery task
-        from src.tasks.pipeline import (
-            run_discovery_task,
-            run_goabase_sync_task,
-            run_research_task,
-            run_sync_task,
-        )
+        await broadcast_job_update(job_type_str, JobTracker.get_status(job_type))
 
-        task_map = {
-            JobType.DISCOVERY: run_discovery_task,
-            JobType.RESEARCH: run_research_task,
-            JobType.SYNC: run_sync_task,
-            JobType.GOABASE_SYNC: run_goabase_sync_task,
-        }
-
-        task = task_map.get(job_type)
-        if task:
-            celery_task = task.delay()
-            await JobTracker.start_job(job_type, celery_task.id)
-            await broadcast_job_update(job_type_str, JobTracker.get_status(job_type))
-
-            results.append({
-                "job_type": job_type_str,
-                "success": True,
-                "task_id": celery_task.id,
-            })
-        else:
-            results.append({
-                "job_type": job_type_str,
-                "success": False,
-                "error": "Task not found",
-            })
+        results.append({
+            "job_type": job_type_str,
+            "success": True,
+            "task_id": celery_task.id,
+        })
 
     return {"results": results}
 
@@ -480,8 +552,12 @@ async def jobs_websocket(websocket: WebSocket):
     async def on_job_update(data: dict):
         try:
             await websocket.send_json(data)
-        except Exception:
-            pass
+        except (WebSocketDisconnect, RuntimeError) as e:
+            # Client disconnected or connection closed
+            logger.debug(f"WebSocket send failed (client likely disconnected): {e}")
+        except Exception as e:
+            # Unexpected error — log it so we can diagnose issues
+            logger.warning(f"WebSocket send_json failed: {e}")
 
     # Subscribe to all job channels
     for job_type in JobType:
@@ -497,8 +573,16 @@ async def jobs_websocket(websocket: WebSocket):
 
         # Keep connection alive and handle client messages
         while True:
-            message = await websocket.receive_text()
-            data = json.loads(message)
+            try:
+                message = await websocket.receive_text()
+            except (WebSocketDisconnect, RuntimeError):
+                break
+
+            try:
+                data = json.loads(message)
+            except json.JSONDecodeError:
+                logger.warning(f"WebSocket received invalid JSON: {message[:200]}")
+                continue
 
             if data.get("action") == "ping":
                 await websocket.send_json({"type": "pong"})
@@ -517,4 +601,7 @@ async def jobs_websocket(websocket: WebSocket):
             _job_websockets.remove(websocket)
 
         for job_type in JobType:
-            await broadcaster.unsubscribe(f"jobs:{job_type.value}", on_job_update)
+            try:
+                await broadcaster.unsubscribe(f"jobs:{job_type.value}", on_job_update)
+            except Exception as e:
+                logger.warning(f"Broadcaster unsubscribe failed: {e}")

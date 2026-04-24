@@ -61,6 +61,7 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://partymap:partymap@db:5432/partymap_bot
       - REDIS_URL=redis://redis:6379/0
+      - SKIP_MIGRATIONS=true
     env_file:
       - .env
     depends_on:
@@ -70,7 +71,7 @@ services:
         condition: service_healthy
       api:
         condition: service_started
-    command: celery -A src.tasks.celery_app worker -l info -Q celery,discovery,dedup,research,sync -c 3
+    command: celery -A src.tasks.celery_app worker -l info -Q celery,discovery,dedup,research,sync,refresh -c 3
     healthcheck:
       test: ["CMD-SHELL", "celery -A src.tasks.celery_app inspect ping --destination celery@$$HOSTNAME || exit 1"]
       interval: 30s
@@ -86,6 +87,7 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://partymap:partymap@db:5432/partymap_bot
       - REDIS_URL=redis://redis:6379/0
+      - SKIP_MIGRATIONS=true
     env_file:
       - .env
     depends_on:

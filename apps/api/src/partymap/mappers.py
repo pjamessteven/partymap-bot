@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from src.core.schemas import EventDateData, ResearchedFestival, TicketInfo
+from src.core.schemas import EventDateData, FestivalData, ResearchedFestival, TicketInfo
 
 
 class FestivalMapper:
@@ -71,8 +71,9 @@ class FestivalMapper:
             payload["next_event_date_artists"] = [{"name": a} for a in first_date.lineup]
 
         # Add size (capacity/attendance)
-        if first_date.size:
-            payload["next_event_date_size"] = first_date.size
+        size = getattr(first_date, 'size', None) or getattr(first_date, 'expected_size', None)
+        if size:
+            payload["next_event_date_size"] = size
 
         # Add lineup images
         if first_date.lineup_images:
@@ -250,18 +251,19 @@ class GoabaseMapper:
         logo_url = GoabaseMapper._get_image_url(image_data)
 
         return ResearchedFestival(
-            name=name,
-            description=GoabaseMapper._create_summary(description),
-            full_description=description,
-            website_url=jsonld_data.get("url"),
-            location_description=location_desc,
-            event_dates=event_dates,
-            tags=list(set(tags)),  # Deduplicate
-            logo_url=logo_url,
-            source="goabase",
-            source_url=jsonld_data.get("url"),
-            source_modified=GoabaseMapper._parse_modified(party.get("dateModified")),
-            lineup_images=[logo_url] if logo_url else [],
+            festival_data=FestivalData(
+                name=name,
+                description=GoabaseMapper._create_summary(description),
+                full_description=description,
+                website_url=jsonld_data.get("url"),
+                event_dates=event_dates,
+                tags=list(set(tags)),  # Deduplicate
+                logo_url=logo_url,
+                source="goabase",
+                source_url=jsonld_data.get("url"),
+                source_modified=GoabaseMapper._parse_modified(party.get("dateModified")),
+                lineup_images=[logo_url] if logo_url else [],
+            )
         )
 
     @staticmethod

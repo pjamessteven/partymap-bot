@@ -1,7 +1,8 @@
 """Discovery Agent for finding festivals using Exa search with PartyMap deduplication."""
 
+import asyncio
 import logging
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from src.agents.deduplication import DeduplicationAgent
 from src.config import Settings
@@ -9,8 +10,9 @@ from src.core.database import AsyncSessionLocal
 from src.core.models import DiscoveryQuery, FestivalState
 from src.core.schemas import DiscoveredFestival
 from src.partymap.client import PartyMapClient
-from src.services.exa_client import ExaClient
+from src.research.exa_client import ExaClient
 from src.services.llm_client import LLMClient
+from src.utils.utc_now import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -26,16 +28,35 @@ class DiscoveryAgent:
     - Sets appropriate workflow (new vs update)
     - Cost tracking
     - Decision logging
+    - Real-time streaming via writer callback
     """
 
     MAX_COST_CENTS = 200  # $2.00 per run
     QUERIES_PER_RUN = 3
 
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, writer: Optional[Callable[[dict], None]] = None):
         self.settings = settings
         self.decisions: List[Dict] = []
         self.cost_cents = 0
         self.exa: Optional[ExaClient] = None
+        self.writer = writer
+        self.thread_id: Optional[str] = None
+
+    def _broadcast(self, event_type: str, data: dict):
+        """Broadcast event to writer if available."""
+        if self.writer:
+            event = {
+                "event": event_type,
+                "data": data,
+                "timestamp": utc_now().isoformat(),
+            }
+            # Handle both sync and async writers
+            try:
+                result = self.writer(event)
+                if asyncio.iscoroutine(result):
+                    asyncio.create_task(result)
+            except Exception as e:
+                logger.warning(f"Failed to broadcast discovery event: {e}")
 
     async def __aenter__(self):
         """Async context manager entry."""
@@ -66,6 +87,13 @@ class DiscoveryAgent:
         if not self.exa:
             self.exa = ExaClient(self.settings)
 
+        # Broadcast start
+        self._broadcast("start", {
+            "message": "Starting discovery",
+            "manual_query": manual_query,
+            "thread_id": self.thread_id,
+        })
+
         if manual_query:
             queries = [manual_query]
             self._log_decision(
@@ -75,6 +103,10 @@ class DiscoveryAgent:
                 next_step="search",
                 confidence=1.0,
             )
+            self._broadcast("query", {
+                "type": "manual",
+                "query": manual_query,
+            })
         else:
             queries = await self._get_next_queries()
             self._log_decision(
@@ -84,24 +116,60 @@ class DiscoveryAgent:
                 next_step="search_each",
                 confidence=1.0,
             )
+            self._broadcast("query", {
+                "type": "rotation",
+                "queries": queries,
+                "count": len(queries),
+            })
 
         all_festivals: List[DiscoveredFestival] = []
 
         # Process queries with Exa
-        for query in queries:
+        for idx, query in enumerate(queries):
             # Skip goabase queries (handled by separate sync)
             if "goabase" in query.lower() or "psytrance" in query.lower():
                 logger.info(f"Skipping goabase query (handled by separate sync): {query}")
+                self._broadcast("skip", {
+                    "query": query,
+                    "reason": "handled_by_goabase_sync",
+                })
                 continue
+
+            self._broadcast("search_start", {
+                "query": query,
+                "progress": {"current": idx + 1, "total": len(queries)},
+            })
 
             festivals = await self._search_exa(query)
             all_festivals.extend(festivals)
+
+            self._broadcast("search_complete", {
+                "query": query,
+                "found": len(festivals),
+                "total_so_far": len(all_festivals),
+            })
 
             # Track cost
             self.cost_cents += 10  # $0.10 per Exa search
 
         # Deduplicate by URL
+        before_dedup = len(all_festivals)
         all_festivals = self._deduplicate_by_url(all_festivals)
+        after_dedup = len(all_festivals)
+
+        self._broadcast("deduplicate", {
+            "before": before_dedup,
+            "after": after_dedup,
+            "removed": before_dedup - after_dedup,
+        })
+
+        # Broadcast each discovered festival
+        for festival in all_festivals:
+            self._broadcast("festival_found", {
+                "name": festival.name,
+                "source": festival.source,
+                "source_url": festival.source_url,
+            })
 
         self._log_decision(
             thought="Discovery complete",
@@ -110,6 +178,13 @@ class DiscoveryAgent:
             next_step="done",
             confidence=1.0,
         )
+
+        # Broadcast completion
+        self._broadcast("complete", {
+            "total_found": len(all_festivals),
+            "queries_run": len(queries),
+            "cost_cents": self.cost_cents,
+        })
 
         return all_festivals
 
@@ -220,11 +295,12 @@ class DiscoveryAgent:
     async def _get_next_queries(self) -> List[str]:
         """Get next queries from rotation."""
         async with AsyncSessionLocal() as session:
-            # Get active queries, ordered by last_used
+            from sqlalchemy import select
+            # Get active queries, ordered by last_run_at
             result = await session.execute(
-                DiscoveryQuery.__table__.select()
-                .where(DiscoveryQuery.is_active == True)
-                .order_by(DiscoveryQuery.last_used.asc())
+                select(DiscoveryQuery)
+                .where(DiscoveryQuery.enabled == True)
+                .order_by(DiscoveryQuery.last_run_at.asc())
                 .limit(self.QUERIES_PER_RUN)
             )
             queries = result.scalars().all()
@@ -237,13 +313,13 @@ class DiscoveryAgent:
                     "outdoor music festival 2026",
                 ]
 
-            # Update last_used timestamp
+            # Update last_run_at timestamp
             for query in queries:
-                query.last_used = utc_now()
+                query.last_run_at = utc_now()
 
             await session.commit()
 
-            return [q.query_text for q in queries]
+            return [q.query for q in queries]
 
     async def _search_exa(self, query: str) -> List[DiscoveredFestival]:
         """Search for festivals using Exa."""

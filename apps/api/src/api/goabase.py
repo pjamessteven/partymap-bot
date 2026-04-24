@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
-from src.dashboard.settings_router import get_setting_value, update_setting
+from src.core.settings_utils import get_setting_value, update_setting
 from src.tasks.goabase_tasks import (
     get_goabase_sync_status,
     goabase_sync_stop_task,
@@ -21,7 +21,7 @@ async def start_goabase_sync(
     """
     Manually trigger Goabase sync.
     
-    Returns immediately with task ID. Check status with /sync/status endpoint.
+    Returns immediately with task ID and thread_id. Stream progress via /threads/{thread_id}/runs/stream.
     """
     # Check if already running
     status = await get_goabase_sync_status()
@@ -31,13 +31,18 @@ async def start_goabase_sync(
             detail="Goabase sync is already running"
         )
 
-    # Trigger Celery task
-    task = goabase_sync_task.delay()
+    # Generate thread ID for streaming
+    import uuid
+    thread_id = f"goabase_{uuid.uuid4().hex[:8]}"
+
+    # Trigger Celery task with thread_id
+    task = goabase_sync_task.delay(thread_id=thread_id)
 
     return {
         "status": "started",
         "task_id": task.id,
-        "message": "Goabase sync started. Check /sync/status for progress."
+        "thread_id": thread_id,
+        "message": "Goabase sync started. Stream progress via /threads/{thread_id}/runs/stream"
     }
 
 
@@ -150,10 +155,8 @@ async def update_goabase_settings(
                 )
 
     # Update settings
-    from src.core.schemas import SystemSettingUpdate
     for key, value in settings.items():
-        update = SystemSettingUpdate(value=value)
-        await update_setting(key=key, update=update, db=db)
+        await update_setting(db=db, key=key, value=str(value))
 
     return {
         "status": "success",

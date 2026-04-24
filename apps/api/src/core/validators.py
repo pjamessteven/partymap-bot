@@ -39,11 +39,12 @@ class PartyMapSyncValidator:
         self.warnings: List[Dict[str, Any]] = []
         self.missing_fields: List[str] = []
 
-    def validate(self, festival_data: FestivalData) -> ValidationResult:
+    def validate(self, festival_data: FestivalData, allow_missing_logo: bool = False) -> ValidationResult:
         """
         Run all validations and return comprehensive result.
-        
+
         :param festival_data: Festival data to validate
+        :param allow_missing_logo: If True, missing logo is a warning not error (force sync)
         :return: ValidationResult with status, errors, warnings, and completeness score
         """
         self.errors = []
@@ -53,12 +54,12 @@ class PartyMapSyncValidator:
         # Run all validation checks
         self._validate_basic_info(festival_data)
         self._validate_event_dates(festival_data)
-        self._validate_media(festival_data)
+        self._validate_media(festival_data, allow_missing_logo=allow_missing_logo)
         self._validate_classification(festival_data)
         self._validate_optional_fields(festival_data)
 
         # Calculate completeness score
-        completeness_score = self._calculate_completeness(festival_data)
+        completeness_score = self._calculate_completeness(festival_data, allow_missing_logo=allow_missing_logo)
 
         # Determine final status
         if self.errors:
@@ -240,16 +241,29 @@ class PartyMapSyncValidator:
                         "severity": "warning"
                     })
 
-    def _validate_media(self, data: FestivalData) -> None:
-        """Validate media items."""
+    def _validate_media(self, data: FestivalData, allow_missing_logo: bool = False) -> None:
+        """Validate media items.
+
+        Args:
+            data: Festival data to validate
+            allow_missing_logo: If True, logo is treated as a warning instead of error
+                               (used for force_sync override)
+        """
         # Logo is required per PartyMap schema
         if not data.logo_url:
-            self.errors.append({
-                "field": "logo_url",
-                "message": "Logo image is required for PartyMap sync",
-                "severity": "error"
-            })
-            self.missing_fields.append("logo_url")
+            if allow_missing_logo:
+                self.warnings.append({
+                    "field": "logo_url",
+                    "message": "Logo image is missing (force sync enabled)",
+                    "severity": "warning"
+                })
+            else:
+                self.errors.append({
+                    "field": "logo_url",
+                    "message": "Logo image is required for PartyMap sync",
+                    "severity": "error"
+                })
+                self.missing_fields.append("logo_url")
         else:
             # Validate logo URL format
             if not self._is_valid_url(str(data.logo_url)):
@@ -320,14 +334,19 @@ class PartyMapSyncValidator:
                     "severity": "warning"
                 })
 
-    def _calculate_completeness(self, data: FestivalData) -> float:
-        """Calculate data completeness score (0.0 - 1.0)."""
+    def _calculate_completeness(self, data: FestivalData, allow_missing_logo: bool = False) -> float:
+        """Calculate data completeness score (0.0 - 1.0).
+
+        Args:
+            data: Festival data
+            allow_missing_logo: If True, logo is excluded from required fields
+        """
         required_fields = {
             "name": bool(data.name and len(data.name.strip()) >= self.MIN_NAME_LENGTH),
             "description": bool(data.description and len(data.description.strip()) >= self.MIN_DESCRIPTION_LENGTH),
             "full_description": bool(data.full_description and len(data.full_description.strip()) >= self.MIN_FULL_DESCRIPTION_LENGTH),
             "event_dates": bool(data.event_dates),
-            "logo": bool(data.logo_url),
+            "logo": bool(data.logo_url) or allow_missing_logo,  # Consider logo present if override enabled
         }
 
         optional_fields = {

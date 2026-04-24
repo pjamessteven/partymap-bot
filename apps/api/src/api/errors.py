@@ -185,10 +185,17 @@ async def validate_festival(
 
     try:
         festival_data = FestivalData(**festival.research_data)
+        validation_result = validate_festival_for_sync(festival_data)
     except Exception as e:
-        raise HTTPException(400, f"Invalid research data: {e}")
-
-    validation_result = validate_festival_for_sync(festival_data)
+        from src.core.validators import ValidationResult
+        validation_result = ValidationResult(
+            is_valid=False,
+            status="invalid",
+            errors=[{"message": str(e)}],
+            warnings=[],
+            missing_fields=[],
+            completeness_score=0.0,
+        )
 
     # Update festival with validation results
     festival.validation_status = validation_result.status

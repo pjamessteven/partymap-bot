@@ -63,7 +63,7 @@ class DeadLetterQueue:
                     state=FestivalState.QUARANTINED.value,
                     quarantined_at=now,
                     quarantine_reason=reason,
-                    error_category=error_category.value if error_category else None,
+                    error_category=(error_category.value if hasattr(error_category, "value") else error_category) if error_category else None,
                     error_context=error_context,
                     max_retries_reached=True,
                     updated_at=now,
@@ -165,7 +165,10 @@ class DeadLetterQueue:
 
             # Reset retry count and state
             now = utc_now()
-            target_state = (new_state.value if new_state else None) or FestivalState.NEEDS_RESEARCH_NEW.value
+            if new_state is not None:
+                target_state = new_state.value if hasattr(new_state, "value") else str(new_state)
+            else:
+                target_state = FestivalState.NEEDS_RESEARCH_NEW.value
 
             await self.db.execute(
                 update(Festival)
@@ -193,8 +196,8 @@ class DeadLetterQueue:
 
             return {
                 "success": True,
-                "message": f"Festival moved to {target_state.value}",
-                "new_state": target_state.value,
+                "message": f"Festival moved to {target_state}",
+                "new_state": target_state,
                 "validation": validation_result.dict() if validation_result else None,
             }
 
