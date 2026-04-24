@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { AgentStream } from '@/components/agents/AgentStream'
 import { ThreadList } from '@/components/agents/ThreadList'
+import { AgentStreamDrawer } from './AgentStreamDrawer'
 import {
   startDiscoveryJob,
   stopDiscoveryJob,
@@ -20,7 +21,7 @@ import {
 } from '@/lib/api'
 import { useJobWebSocket } from '@/lib/hooks/use-job-websocket'
 import type { JobStatusDetail } from '@/types'
-import { Loader2, Play, Square, CheckCircle, XCircle, Clock } from 'lucide-react'
+import { Loader2, Play, Square, CheckCircle, XCircle, Clock, Eye } from 'lucide-react'
 import { cn, formatRelativeTime } from '@/lib/utils'
 import { useToast } from '@/components/ui/toast-provider'
 import { JobStream } from './JobStream'
@@ -34,6 +35,7 @@ export function JobPanel({ jobType, showStream }: JobPanelProps) {
   const [selectedThread, setSelectedThread] = useState<string | null>(null)
   const [isStarting, setIsStarting] = useState(false)
   const [isStopping, setIsStopping] = useState(false)
+  const [inspectorFestivalId, setInspectorFestivalId] = useState<string | null>(null)
   const { success } = useToast()
 
   // Real-time WebSocket + REST fallback
@@ -131,7 +133,7 @@ export function JobPanel({ jobType, showStream }: JobPanelProps) {
           />
         )}
 
-        <ProcessingFestivals jobType={jobType} status={status} />
+        <ProcessingFestivals jobType={jobType} status={status} onInspect={setInspectorFestivalId} />
       </div>
 
       {/* Right: Job Stream or Job Status */}
@@ -146,6 +148,13 @@ export function JobPanel({ jobType, showStream }: JobPanelProps) {
           <JobStatusPanel jobType={jobType} status={status} />
         )}
       </div>
+
+      <AgentStreamDrawer
+        open={!!inspectorFestivalId}
+        onClose={() => setInspectorFestivalId(null)}
+        festivalId={inspectorFestivalId}
+        jobType={jobType}
+      />
     </div>
   )
 }
@@ -267,9 +276,11 @@ function JobControlCard({
 function ProcessingFestivals({
   jobType,
   status,
+  onInspect,
 }: {
   jobType: string
   status?: JobStatusDetail
+  onInspect?: (festivalId: string) => void
 }) {
   const processing = status?.currently_processing
 
@@ -284,10 +295,21 @@ function ProcessingFestivals({
             {processing.slice(0, 5).map((item) => (
               <div
                 key={item.id}
-                className="flex items-center justify-between text-sm rounded-md bg-muted/50 px-2 py-1"
+                className="flex items-center justify-between text-sm rounded-md bg-muted/50 px-2 py-1 group"
               >
                 <span className="truncate">{item.name}</span>
-                <Loader2 className="h-3 w-3 animate-spin text-muted-foreground flex-shrink-0" />
+                <div className="flex items-center gap-2">
+                  {onInspect && (
+                    <button
+                      onClick={() => onInspect(item.id)}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-muted"
+                      title="Inspect stream"
+                    >
+                      <Eye className="h-3 w-3 text-muted-foreground" />
+                    </button>
+                  )}
+                  <Loader2 className="h-3 w-3 animate-spin text-muted-foreground flex-shrink-0" />
+                </div>
               </div>
             ))}
             {processing.length > 5 && (

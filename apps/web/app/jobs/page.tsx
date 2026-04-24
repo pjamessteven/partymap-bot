@@ -5,11 +5,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import dynamic from 'next/dynamic'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-
-const JobPanel = dynamic(
-  () => import('@/components/jobs/JobPanel').then((mod) => mod.JobPanel),
-  { ssr: false }
-)
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -32,6 +27,12 @@ import {
   Loader2,
 } from 'lucide-react'
 import { formatRelativeTime, cn } from '@/lib/utils'
+import { GoabaseSyncPanel } from '@/components/GoabaseSyncPanel'
+
+const JobPanel = dynamic(
+  () => import('@/components/jobs/JobPanel').then((mod) => mod.JobPanel),
+  { ssr: false }
+)
 
 interface SimpleJobStatus {
   status: string
@@ -99,7 +100,14 @@ export default function JobsPage() {
 
         {/* Goabase Tab - With AI Elements Stream */}
         <TabsContent value="goabase" className="flex-1">
-          <JobPanel jobType="goabase" showStream={true} />
+          <div className="grid h-full grid-cols-3 gap-4">
+            <div className="col-span-2">
+              <JobPanel jobType="goabase" showStream={true} />
+            </div>
+            <div className="col-span-1 overflow-auto">
+              <GoabaseSyncPanel />
+            </div>
+          </div>
         </TabsContent>
       </Tabs>
     </div>

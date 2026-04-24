@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   getFestivals,
@@ -115,9 +115,25 @@ export default function FestivalsPage() {
 
   // Filters
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [state, setState] = useState('')
   const [source, setSource] = useState('')
   const [offset, setOffset] = useState(0)
+
+  // Debounce search input
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [search])
+
+  // Auto-refetch when debounced search changes
+  useEffect(() => {
+    setOffset(0)
+    clearSelection()
+    refetch()
+  }, [debouncedSearch])
 
   // Sorting
   const [sortField, setSortField] = useState<SortField>('created_at')
@@ -140,10 +156,10 @@ export default function FestivalsPage() {
   const limit = 20
 
   const { data, isLoading, refetch } = useQuery({
-    queryKey: ['festivals', { search, state, source, offset, limit }],
+    queryKey: ['festivals', { search: debouncedSearch, state, source, offset, limit }],
     queryFn: () =>
       getFestivals({
-        search: search || undefined,
+        search: debouncedSearch || undefined,
         state: state || undefined,
         source: source || undefined,
         offset,

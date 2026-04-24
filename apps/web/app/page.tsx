@@ -64,6 +64,8 @@ import type { Thread } from '@/lib/api'
 export default function DashboardPage() {
   const [isRunningDiscovery, setIsRunningDiscovery] = useState(false)
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null)
+  const [activityOffset, setActivityOffset] = useState(0)
+  const activityLimit = 10
   const { success } = useToast()
 
   const { statuses: wsStatuses, isConnected: wsConnected } = useJobWebSocket()
@@ -118,8 +120,8 @@ export default function DashboardPage() {
   })
 
   const { data: jobActivity } = useQuery({
-    queryKey: ['job-activity', 10],
-    queryFn: () => getJobActivity(undefined, 10),
+    queryKey: ['job-activity', activityLimit, activityOffset],
+    queryFn: () => getJobActivity(undefined, activityLimit, activityOffset),
     refetchInterval: 10000,
   })
 
@@ -774,6 +776,30 @@ export default function DashboardPage() {
               <p className="text-muted-foreground text-center py-4">
                 No recent activity
               </p>
+            )}
+
+            {/* Activity Pagination */}
+            {jobActivity && jobActivity.items.length >= activityLimit && (
+              <div className="flex items-center justify-between mt-4 pt-4 border-t">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={activityOffset === 0}
+                  onClick={() => setActivityOffset(Math.max(0, activityOffset - activityLimit))}
+                >
+                  Previous
+                </Button>
+                <span className="text-xs text-muted-foreground">
+                  Page {Math.floor(activityOffset / activityLimit) + 1}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setActivityOffset(activityOffset + activityLimit)}
+                >
+                  Next
+                </Button>
+              </div>
             )}
           </CardContent>
         </Card>

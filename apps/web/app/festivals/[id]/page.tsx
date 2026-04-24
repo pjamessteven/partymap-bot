@@ -66,6 +66,7 @@ import { StateBadge } from '@/components/state-badge'
 import { ConfirmDialog, PromptDialog } from '@/components/ui/dialog-confirm'
 import { SkeletonCard } from '@/components/ui/skeleton'
 import { FestivalEditor } from '@/components/FestivalEditor'
+import { ValidationPanel } from '@/components/ValidationPanel'
 
 export default function FestivalDetailPage() {
   const params = useParams()
@@ -830,6 +831,13 @@ export default function FestivalDetailPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Validation Panel */}
+      <ValidationPanel
+        festival={festival as any}
+        onValidate={() => validateMutation.mutate()}
+        isLoading={validateMutation.isPending}
+      />
 
       {/* Pipeline Activity History */}
       {festivalActivity.length > 0 && (
