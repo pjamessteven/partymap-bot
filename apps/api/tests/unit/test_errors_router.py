@@ -132,7 +132,7 @@ class TestBulkRetry:
         
         response = await async_client.post(
             "/api/errors/quarantined/bulk-retry",
-            json={"festival_ids": [str(f1.id), str(f2.id), "not-a-uuid"]}
+            json=[str(f1.id), str(f2.id), "not-a-uuid"]
         )
         assert response.status_code == 400  # Invalid UUID in list
 
@@ -144,7 +144,7 @@ class TestBulkRetry:
         
         response = await async_client.post(
             "/api/errors/quarantined/bulk-retry",
-            json={"festival_ids": [str(f1.id), str(f2.id)]}
+            json=[str(f1.id), str(f2.id)]
         )
         assert response.status_code == 200
         data = response.json()

@@ -85,20 +85,20 @@ class TestDeduplicate:
     """Tests for POST /api/festivals/{id}/deduplicate"""
 
     @pytest.mark.asyncio
-    async def test_new_festival(self, async_client, db_session, mock_partymap_client, mock_celery_tasks):
-        """New festival queues for research."""
-        mock_partymap_client.find_existing_event.return_value = None
+    async def test_new_festival(self, async_client, db_session, mock_celery_tasks):
+        """New festival queues deduplication task."""
         festival = await create_festival(db_session)
-        
+
         response = await async_client.post(f"/api/festivals/{festival.id}/deduplicate")
         assert response.status_code == 200
+        data = response.json()
+        assert data["action_taken"] == "deduplication_queued"
 
     @pytest.mark.asyncio
-    async def test_existing_event(self, async_client, db_session, mock_partymap_client):
-        """Existing event found marks as duplicate."""
-        mock_partymap_client.find_existing_event.return_value = {"id": 12345, "name": "Existing"}
+    async def test_existing_event(self, async_client, db_session, mock_celery_tasks):
+        """Deduplication endpoint queues task regardless of result."""
         festival = await create_festival(db_session)
-        
+
         response = await async_client.post(f"/api/festivals/{festival.id}/deduplicate")
         assert response.status_code == 200
 
@@ -118,7 +118,7 @@ class TestResearch:
         assert data["result"] in ("queued", "started")
 
     @pytest.mark.asyncio
-    async def test_already_researching(self, async_client, db_session):
+    async def test_already_researching(self, async_client, db_session, mock_celery_tasks):
         """Returns appropriate response if already researching."""
         festival = await create_festival(db_session, state=FestivalState.RESEARCHING.value)
         
@@ -140,7 +140,7 @@ class TestSync:
         assert data["action"] == "sync"
 
     @pytest.mark.asyncio
-    async def test_no_research_data(self, async_client, db_session):
+    async def test_no_research_data(self, async_client, db_session, mock_celery_tasks):
         """Returns error if no research data."""
         festival = await create_festival(db_session, research_data=None, state=FestivalState.RESEARCHED.value)
         
@@ -153,7 +153,7 @@ class TestRetry:
     """Tests for POST /api/festivals/{id}/retry"""
 
     @pytest.mark.asyncio
-    async def test_resets_failed(self, async_client, db_session):
+    async def test_resets_failed(self, async_client, db_session, mock_celery_tasks):
         """Resets failed festival state."""
         festival = await create_festival(db_session, state=FestivalState.FAILED.value, retry_count=3)
         

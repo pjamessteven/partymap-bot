@@ -9,8 +9,8 @@ VALID_FESTIVAL_DATA = {
     "full_description": "Join us for three days of incredible performances from world-class artists across multiple stages.",
     "event_dates": [
         {
-            "start": datetime(2026, 7, 15, 14, 0, 0),
-            "end": datetime(2026, 7, 17, 23, 0, 0),
+            "start": datetime(2026, 7, 15, 14, 0, 0).isoformat(),
+            "end": datetime(2026, 7, 17, 23, 0, 0).isoformat(),
             "location_description": "Central Park, New York, NY",
             "lineup": ["Artist A", "Artist B", "Artist C"],
             "tickets": [
@@ -43,8 +43,8 @@ PARTIALLY_VALID_FESTIVAL_DATA = {
     "full_description": "A full description that meets the minimum length requirement for PartyMap sync",
     "event_dates": [
         {
-            "start": datetime(2026, 7, 15, 14, 0, 0),
-            "end": datetime(2026, 7, 17, 23, 0, 0),
+            "start": datetime(2026, 7, 15, 14, 0, 0).isoformat(),
+            "end": datetime(2026, 7, 17, 23, 0, 0).isoformat(),
             "location_description": "NYC",
         }
     ],

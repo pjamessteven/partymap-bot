@@ -1,300 +1,249 @@
 """Unit tests for deduplication engine."""
 
+import json
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import uuid4
 
 import pytest
 
-from src.config import Settings
-from src.core.schemas import EventDateData, ResearchedFestival
-from src.partymap.client import PartyMapClient
-from src.agents.deduplication import DeduplicationAgent
+from src.agents.deduplication import DeduplicationAgent, DeduplicationResult
 
 
 @pytest.fixture
 def mock_settings():
     """Create mock settings."""
-    return MagicMock(spec=Settings)
+    return MagicMock()
 
 
 @pytest.fixture
-def mock_client(mock_settings):
+def mock_llm():
+    """Create mock LLM client."""
+    llm = MagicMock()
+    llm.chat_completion = AsyncMock()
+    return llm
+
+
+@pytest.fixture
+def mock_partymap():
     """Create mock PartyMap client."""
-    client = MagicMock(spec=PartyMapClient)
+    client = MagicMock()
+    client.search_events = AsyncMock(return_value=[])
     return client
 
 
 @pytest.fixture
-def dedup_engine(mock_client, mock_settings):
-    """Create deduplication engine."""
-    return DeduplicationAgent(mock_client, mock_settings)
+def dedup_agent(mock_settings, mock_llm, mock_partymap):
+    """Create deduplication agent."""
+    return DeduplicationAgent(mock_settings, mock_llm, mock_partymap)
 
 
-class TestDeduplicationAgent:
-    """Test deduplication logic."""
-
-    @pytest.mark.asyncio
-    async def test_process_new_festival(self, dedup_engine, mock_client):
-        """Test processing a completely new festival."""
-        mock_client.find_existing_event = AsyncMock(return_value=None)
-
-        festival = ResearchedFestival(
-            name="Brand New Festival",
-            event_dates=[
-                EventDateData(
-                    start=datetime(2026, 7, 15),
-                    location_description="Berlin",
-                )
-            ],
-        )
-
-        is_dup, existing_id, action = await dedup_engine.process_festival(festival)
-
-        assert is_dup is False
-        assert existing_id is None
-        assert action == "new"
+class TestCheckDuplicate:
+    """Tests for check_duplicate method."""
 
     @pytest.mark.asyncio
-    async def test_process_duplicate_skip(self, dedup_engine, mock_client):
-        """Test processing duplicate that's up to date."""
-        existing_id = uuid4()
-        mock_client.find_existing_event = AsyncMock(
-            return_value={
-                "id": str(existing_id),
-                "name": "Existing Festival",
-                "event_dates": [
-                    {
-                        "start": "2026-07-15T00:00:00",
-                        "location": {"description": "Berlin"},
-                    }
-                ],
-            }
-        )
-        mock_client.should_update_event = AsyncMock(return_value=False)
+    async def test_no_matches_found(self, dedup_agent, mock_partymap):
+        """No potential matches → not duplicate with 1.0 confidence."""
+        mock_partymap.search_events.return_value = []
 
-        festival = ResearchedFestival(
-            name="Existing Festival",
-            event_dates=[
-                EventDateData(
-                    start=datetime(2026, 7, 15),
-                    location_description="Berlin",
-                )
-            ],
-            source_modified=datetime(2024, 1, 1),
+        result = await dedup_agent.check_duplicate(
+            discovered_name="Brand New Festival",
+            discovered_location="Berlin",
         )
 
-        is_dup, found_id, action = await dedup_engine.process_festival(festival)
-
-        assert is_dup is True
-        assert found_id == existing_id
-        assert action == "skip"
+        assert result.is_duplicate is False
+        assert result.confidence == 1.0
+        assert "No events found" in result.reasoning
 
     @pytest.mark.asyncio
-    async def test_process_duplicate_update(self, dedup_engine, mock_client):
-        """Test processing duplicate that needs update."""
-        existing_id = uuid4()
-        mock_client.find_existing_event = AsyncMock(
-            return_value={
-                "id": str(existing_id),
-                "name": "Existing Festival",
-                "event_dates": [
-                    {
-                        "start": "2026-07-15T00:00:00",
-                        "location": {"description": "Berlin"},
-                    }
-                ],
-            }
-        )
-        mock_client.should_update_event = AsyncMock(return_value=True)
+    async def test_llm_says_duplicate(self, dedup_agent, mock_partymap, mock_llm):
+        """LLM determines it's a duplicate."""
+        mock_partymap.search_events.return_value = [
+            {"id": 123, "name": "Existing Festival", "location": {"description": "Berlin"}}
+        ]
+        mock_llm.chat_completion.return_value = json.dumps({
+            "is_duplicate": True,
+            "confidence": 0.95,
+            "update_reasons": ["missing_dates"],
+            "reasoning": "Same festival",
+        })
 
-        festival = ResearchedFestival(
-            name="Existing Festival",
-            event_dates=[
-                EventDateData(
-                    start=datetime(2026, 7, 15),
-                    location_description="Berlin",
-                )
-            ],
-            source_modified=datetime(2024, 6, 1),
+        result = await dedup_agent.check_duplicate(
+            discovered_name="Existing Festival",
+            discovered_location="Berlin",
         )
 
-        is_dup, found_id, action = await dedup_engine.process_festival(festival)
-
-        assert is_dup is True
-        assert found_id == existing_id
-        assert action == "update"
+        assert result.is_duplicate is True
+        assert result.confidence == 0.95
+        assert result.event_id == 123
+        assert "missing_dates" in result.update_reasons
+        mock_llm.chat_completion.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_process_new_event_date(self, dedup_engine, mock_client):
-        """Test processing new date for existing festival."""
-        existing_id = uuid4()
-        mock_client.find_existing_event = AsyncMock(
-            return_value={
-                "id": str(existing_id),
-                "name": "Festival Series",
-                "event_dates": [
-                    {
-                        "start": "2026-07-15T00:00:00",
-                        "location": {"description": "Berlin"},
-                    }
-                ],
-            }
+    async def test_llm_says_not_duplicate(self, dedup_agent, mock_partymap, mock_llm):
+        """LLM determines it's NOT a duplicate → default not-duplicate result."""
+        mock_partymap.search_events.return_value = [
+            {"id": 123, "name": "Different Festival", "location": {"description": "Hamburg"}}
+        ]
+        mock_llm.chat_completion.return_value = json.dumps({
+            "is_duplicate": False,
+            "confidence": 0.1,
+            "update_reasons": [],
+            "reasoning": "Different location and name",
+        })
+
+        result = await dedup_agent.check_duplicate(
+            discovered_name="My Festival",
+            discovered_location="Berlin",
         )
 
-        # Same festival but different date
-        festival = ResearchedFestival(
-            name="Festival Series",
-            event_dates=[
-                EventDateData(
-                    start=datetime(2027, 7, 15),  # Different year
-                    location_description="Berlin",
-                )
-            ],
+        assert result.is_duplicate is False
+        # When no match is found, check_duplicate returns default confidence=1.0
+        assert result.confidence == 1.0
+
+    @pytest.mark.asyncio
+    async def test_uses_clean_name_for_search(self, dedup_agent, mock_partymap):
+        """When clean_name provided, it's used as search query."""
+        mock_partymap.search_events.return_value = []
+
+        await dedup_agent.check_duplicate(
+            discovered_name="Festival 2026",
+            discovered_location="Berlin",
+            clean_name="Festival",
         )
 
-        is_dup, found_id, action = await dedup_engine.process_festival(festival)
+        mock_partymap.search_events.assert_awaited_once_with("Festival", limit=10)
 
-        assert is_dup is True
-        assert found_id == existing_id
-        assert action == "add_date"
+    @pytest.mark.asyncio
+    async def test_llm_error_defaults_to_not_duplicate(self, dedup_agent, mock_partymap, mock_llm):
+        """LLM failure defaults to not duplicate to be safe."""
+        mock_partymap.search_events.return_value = [
+            {"id": 123, "name": "Existing", "location": {"description": "Berlin"}}
+        ]
+        mock_llm.chat_completion.side_effect = Exception("LLM timeout")
 
-    def test_is_new_event_date_same_date(self, dedup_engine):
-        """Test checking if same event date."""
+        result = await dedup_agent.check_duplicate(
+            discovered_name="Existing",
+            discovered_location="Berlin",
+        )
+
+        assert result.is_duplicate is False
+        # When all evaluations fail, check_duplicate returns default confidence=1.0
+        assert result.confidence == 1.0
+
+
+class TestEvaluateMatchWithLLM:
+    """Tests for _evaluate_match_with_llm method."""
+
+    @pytest.mark.asyncio
+    async def test_builds_prompt_with_event_data(self, dedup_agent, mock_llm):
+        """Prompt includes discovered and existing event details."""
+        mock_llm.chat_completion.return_value = json.dumps({
+            "is_duplicate": True,
+            "confidence": 0.9,
+            "update_reasons": [],
+            "reasoning": "Match",
+        })
+
         existing_event = {
-            "event_dates": [
-                {
-                    "start": "2026-07-15T14:00:00",
-                    "location": {"description": "Berlin, Germany"},
-                }
-            ]
+            "name": "Test Fest",
+            "location": {"description": "Berlin"},
+            "next_date": {"start": "2026-07-15", "end": "2026-07-17", "confirmed": True},
         }
 
-        festival = ResearchedFestival(
-            name="Test",
-            event_dates=[
-                EventDateData(
-                    start=datetime(2026, 7, 15, 14, 0, 0),
-                    location_description="Berlin",
-                )
-            ],
+        result = await dedup_agent._evaluate_match_with_llm(
+            discovered_name="Test Fest",
+            discovered_location="Berlin",
+            discovered_dates="2026-07-15",
+            discovered_description="A festival",
+            existing_event=existing_event,
         )
 
-        result = dedup_engine._is_new_event_date(existing_event, festival)
-        assert result is False  # Same date, not new
+        assert result.is_duplicate is True
+        # Verify prompt was built with key info
+        call_args = mock_llm.chat_completion.call_args
+        messages = call_args.kwargs["messages"]
+        prompt = messages[1]["content"]
+        assert "Test Fest" in prompt
+        assert "Berlin" in prompt
+        assert "2026-07-15" in prompt
 
-    def test_is_new_event_date_different_location(self, dedup_engine):
-        """Test checking different location same date."""
+    @pytest.mark.asyncio
+    async def test_handles_no_next_dates(self, dedup_agent, mock_llm):
+        """Existing event without next_date doesn't crash."""
+        mock_llm.chat_completion.return_value = json.dumps({
+            "is_duplicate": False,
+            "confidence": 0.5,
+            "update_reasons": [],
+            "reasoning": "No dates",
+        })
+
         existing_event = {
-            "event_dates": [
-                {
-                    "start": "2026-07-15T14:00:00",
-                    "location": {"description": "Berlin, Germany"},
-                }
-            ]
+            "name": "Old Fest",
+            "location": {"description": "Berlin"},
         }
 
-        festival = ResearchedFestival(
-            name="Test",
-            event_dates=[
-                EventDateData(
-                    start=datetime(2026, 7, 15, 14, 0, 0),
-                    location_description="Hamburg, Germany",
-                )
-            ],
+        result = await dedup_agent._evaluate_match_with_llm(
+            discovered_name="Old Fest",
+            discovered_location="Berlin",
+            discovered_dates=None,
+            discovered_description=None,
+            existing_event=existing_event,
         )
 
-        result = dedup_engine._is_new_event_date(existing_event, festival)
-        assert result is True  # Different location = new event date
+        assert result.confidence == 0.5
 
-    def test_is_new_event_date_different_year(self, dedup_engine):
-        """Test checking different year."""
-        existing_event = {
-            "event_dates": [
-                {
-                    "start": "2026-07-15T14:00:00",
-                    "location": {"description": "Berlin, Germany"},
-                }
-            ]
-        }
 
-        festival = ResearchedFestival(
-            name="Test",
-            event_dates=[
-                EventDateData(
-                    start=datetime(2027, 7, 15, 14, 0, 0),  # Next year
-                    location_description="Berlin, Germany",
-                )
-            ],
-        )
-
-        result = dedup_engine._is_new_event_date(existing_event, festival)
-        assert result is True  # Different year = new event date
-
-    def test_locations_similar(self, dedup_engine):
-        """Test location similarity matching."""
-        assert dedup_engine._locations_similar("Berlin", "Berlin, Germany")
-        assert dedup_engine._locations_similar("Berlin, Germany", "Berlin")
-        assert not dedup_engine._locations_similar("Berlin", "Hamburg")
-        assert not dedup_engine._locations_similar(None, "Berlin")
+class TestBatchCheckDuplicates:
+    """Tests for batch_check_duplicates method."""
 
     @pytest.mark.asyncio
-    async def test_sync_new_festival(self, dedup_engine, mock_client):
-        """Test syncing new festival."""
-        new_id = uuid4()
-        mock_client.create_event = AsyncMock(return_value=new_id)
+    async def test_processes_multiple_festivals(self, dedup_agent, mock_partymap, mock_llm):
+        """Batch processes multiple festivals."""
+        mock_partymap.search_events.return_value = []
 
-        festival = ResearchedFestival(
-            name="New Festival",
-            event_dates=[EventDateData(start=datetime(2026, 7, 15), location_description="Berlin")],
-        )
+        festivals = [
+            {"name": "Fest A", "location": "Berlin"},
+            {"name": "Fest B", "location": "Hamburg"},
+        ]
 
-        result = await dedup_engine.sync_festival(festival, False, None, "new")
+        results = await dedup_agent.batch_check_duplicates(festivals)
 
-        assert result == new_id
-        mock_client.create_event.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_sync_update_festival(self, dedup_engine, mock_client):
-        """Test syncing update to existing festival."""
-        existing_id = uuid4()
-        mock_client.update_event = AsyncMock()
-
-        festival = ResearchedFestival(
-            name="Updated Festival",
-            event_dates=[EventDateData(start=datetime(2026, 7, 15), location_description="Berlin")],
-        )
-
-        result = await dedup_engine.sync_festival(festival, True, existing_id, "update")
-
-        assert result == existing_id
-        mock_client.update_event.assert_called_once()
+        assert len(results) == 2
+        assert all(not r.is_duplicate for r in results)
+        assert mock_partymap.search_events.await_count == 2
 
     @pytest.mark.asyncio
-    async def test_sync_add_date(self, dedup_engine, mock_client):
-        """Test syncing new event date."""
-        existing_id = uuid4()
-        mock_client.add_event_date = AsyncMock()
+    async def test_calls_progress_callback(self, dedup_agent, mock_partymap):
+        """Progress callback is called for each festival."""
+        mock_partymap.search_events.return_value = []
+        progress = AsyncMock()
 
-        festival = ResearchedFestival(
-            name="Festival",
-            event_dates=[EventDateData(start=datetime(2027, 7, 15), location_description="Berlin")],
+        festivals = [
+            {"name": "Fest A", "location": "Berlin"},
+            {"name": "Fest B", "location": "Hamburg"},
+        ]
+
+        await dedup_agent.batch_check_duplicates(festivals, progress_callback=progress)
+
+        assert progress.await_count == 2
+
+
+class TestDeduplicationResult:
+    """Tests for DeduplicationResult dataclass."""
+
+    def test_defaults(self):
+        """Default values are sensible."""
+        result = DeduplicationResult(is_duplicate=False, confidence=0.0)
+        assert result.event_id is None
+        assert result.event_data is None
+        assert result.update_reasons == []
+        assert result.reasoning == ""
+
+    def test_update_reasons_initialization(self):
+        """Update reasons can be provided."""
+        result = DeduplicationResult(
+            is_duplicate=True,
+            confidence=0.9,
+            update_reasons=["missing_dates", "lineup_released"],
         )
-
-        result = await dedup_engine.sync_festival(festival, True, existing_id, "add_date")
-
-        assert result == existing_id
-        mock_client.add_event_date.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_sync_skip(self, dedup_engine, mock_client):
-        """Test skipping up-to-date festival."""
-        existing_id = uuid4()
-
-        festival = ResearchedFestival(name="Festival", event_dates=[])
-
-        result = await dedup_engine.sync_festival(festival, True, existing_id, "skip")
-
-        assert result == existing_id
-        mock_client.create_event.assert_not_called()
-        mock_client.update_event.assert_not_called()
+        assert len(result.update_reasons) == 2

@@ -76,7 +76,8 @@ class TestUpdateSetting:
         """Updates setting value."""
         setting = SystemSettings(
             key="max_cost_per_day",
-            value=500,
+            value="500",
+            value_type="integer",
             category="cost",
             description="Max daily cost",
         )

@@ -137,5 +137,5 @@ class TestLineupExtractor:
         """Test prompt building without description."""
         prompt = extractor._build_prompt(None)
 
-        assert "Lineup image" in prompt
+        assert "Festival Description:" not in prompt
         assert "JSON" in prompt

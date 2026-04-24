@@ -1,4 +1,4 @@
-"""Tests for schedule management endpoints."""
+"""Tests for schedule management endpoints (unified under settings)."""
 
 import pytest
 
@@ -6,7 +6,7 @@ from src.core.models import PipelineSchedule
 
 
 class TestGetSchedules:
-    """Tests for GET /api/schedule"""
+    """Tests for GET /api/settings/schedules"""
 
     @pytest.mark.asyncio
     async def test_list_all(self, async_client, db_session):
@@ -19,8 +19,8 @@ class TestGetSchedules:
         )
         db_session.add(schedule)
         await db_session.commit()
-        
-        response = await async_client.get("/api/schedule")
+
+        response = await async_client.get("/api/settings/schedules")
         assert response.status_code == 200
         data = response.json()
         assert isinstance(data, list)
@@ -28,7 +28,7 @@ class TestGetSchedules:
 
 
 class TestGetSchedule:
-    """Tests for GET /api/schedule/{task_type}"""
+    """Tests for GET /api/settings/schedules/{task_type}"""
 
     @pytest.mark.asyncio
     async def test_found(self, async_client, db_session):
@@ -41,8 +41,8 @@ class TestGetSchedule:
         )
         db_session.add(schedule)
         await db_session.commit()
-        
-        response = await async_client.get("/api/schedule/discovery")
+
+        response = await async_client.get("/api/settings/schedules/discovery")
         assert response.status_code == 200
         data = response.json()
         assert data["task_type"] == "discovery"
@@ -51,12 +51,12 @@ class TestGetSchedule:
     @pytest.mark.asyncio
     async def test_not_found(self, async_client):
         """Returns 404 for unknown task type."""
-        response = await async_client.get("/api/schedule/unknown_task")
+        response = await async_client.get("/api/settings/schedules/unknown_task")
         assert response.status_code == 404
 
 
 class TestUpdateSchedule:
-    """Tests for PUT /api/schedule/{task_type}"""
+    """Tests for PUT /api/settings/schedules/{task_type}"""
 
     @pytest.mark.asyncio
     async def test_update_time(self, async_client, db_session):
@@ -69,9 +69,9 @@ class TestUpdateSchedule:
         )
         db_session.add(schedule)
         await db_session.commit()
-        
+
         response = await async_client.put(
-            "/api/schedule/discovery",
+            "/api/settings/schedules/discovery",
             json={"hour": 4, "minute": 30}
         )
         assert response.status_code == 200
@@ -90,9 +90,9 @@ class TestUpdateSchedule:
         )
         db_session.add(schedule)
         await db_session.commit()
-        
+
         response = await async_client.put(
-            "/api/schedule/discovery",
+            "/api/settings/schedules/discovery",
             json={"hour": 25, "minute": 0}
         )
         assert response.status_code == 400
@@ -112,8 +112,8 @@ class TestEnableDisable:
         )
         db_session.add(schedule)
         await db_session.commit()
-        
-        response = await async_client.post("/api/schedule/discovery/enable")
+
+        response = await async_client.post("/api/settings/schedules/discovery/enable")
         assert response.status_code == 200
         data = response.json()
         assert data["enabled"] is True
@@ -129,30 +129,35 @@ class TestEnableDisable:
         )
         db_session.add(schedule)
         await db_session.commit()
-        
-        response = await async_client.post("/api/schedule/discovery/disable")
+
+        response = await async_client.post("/api/settings/schedules/discovery/disable")
         assert response.status_code == 200
         data = response.json()
         assert data["enabled"] is False
 
 
 class TestApply:
-    """Tests for POST /api/schedule/apply"""
+    """Tests for POST /api/settings/schedules/apply"""
 
     @pytest.mark.asyncio
     async def test_force_reload(self, async_client):
         """Forces scheduler to reload from DB."""
-        response = await async_client.post("/api/schedule/apply")
+        response = await async_client.post("/api/settings/schedules/apply")
         assert response.status_code == 200
 
 
 class TestRunNow:
-    """Tests for POST /api/schedule/run-now/{task_type}"""
+    """Tests for POST /api/settings/schedules/run-now/{task_type}"""
 
     @pytest.mark.asyncio
-    async def test_trigger(self, async_client, mock_celery_tasks):
+    async def test_trigger(self, async_client, db_session, mock_celery_tasks):
         """Manually triggers scheduled task."""
-        response = await async_client.post("/api/schedule/run-now/discovery")
+        from src.core.models import PipelineSchedule
+        schedule = PipelineSchedule(task_type="discovery", enabled=True, hour=2, minute=0)
+        db_session.add(schedule)
+        await db_session.commit()
+
+        response = await async_client.post("/api/settings/schedules/run-now/discovery")
         assert response.status_code == 200
         data = response.json()
         assert "task_id" in data or "message" in data

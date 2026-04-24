@@ -6,31 +6,44 @@ from uuid import uuid4
 from src.core.models import Festival, FestivalState, RefreshApproval, PipelineSchedule
 
 
+_USE_DEFAULT = object()
+
+
 async def create_festival(
     db_session,
     name="Test Festival",
     source="exa",
     state=FestivalState.DISCOVERED,
-    research_data=None,
+    research_data=_USE_DEFAULT,
     **kwargs,
 ):
     """Create a festival in the test database."""
-    festival = Festival(
-        name=name,
-        source=source,
-        state=state.value if hasattr(state, "value") else state,
-        research_data=research_data or {
+    if research_data is _USE_DEFAULT:
+        research_data = {
             "name": name,
             "description": "A test festival description",
             "full_description": "A full test festival description that is long enough",
+            "logo_url": "https://example.com/logo.jpg",
+            "website_url": "https://example.com",
+            "tags": ["music", "festival"],
+            "media_items": [{"url": "https://example.com/photo.jpg", "caption": "Photo"}],
             "event_dates": [
                 {
                     "start": datetime(2026, 7, 15, 14, 0, 0).isoformat(),
                     "end": datetime(2026, 7, 17, 23, 0, 0).isoformat(),
                     "location_description": "Berlin, Germany",
+                    "location_country": "Germany",
+                    "location_lat": 52.5,
+                    "location_lng": 13.4,
+                    "lineup": ["Artist A", "Artist B"],
                 }
             ],
-        },
+        }
+    festival = Festival(
+        name=name,
+        source=source,
+        state=state.value if hasattr(state, "value") else state,
+        research_data=research_data,
         **kwargs,
     )
     db_session.add(festival)

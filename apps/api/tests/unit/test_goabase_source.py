@@ -107,12 +107,13 @@ class TestGoabaseSource:
 
         result = await goabase_source.research(discovered)
 
-        assert result.name == "Test Psytrance Festival"
-        assert len(result.event_dates) == 1
-        assert result.event_dates[0].location_description == "Mystic Woods, Berlin, Germany"
-        assert len(result.event_dates[0].lineup) == 3
-        assert "goabase" in result.tags
-        assert "psytrance" in result.tags
+        fd = result.festival_data
+        assert fd.name == "Test Psytrance Festival"
+        assert len(fd.event_dates) == 1
+        assert fd.event_dates[0].location_description == "Mystic Woods, Berlin, Germany"
+        assert len(fd.event_dates[0].lineup) == 3
+        assert "goabase" in fd.tags
+        assert "psytrance" in fd.tags
 
     @pytest.mark.asyncio
     async def test_research_missing_url(self, goabase_source):

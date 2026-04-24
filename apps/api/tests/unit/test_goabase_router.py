@@ -16,7 +16,7 @@ class TestGoabaseSync:
         assert "task_id" in data
 
     @pytest.mark.asyncio
-    async def test_stop(self, async_client):
+    async def test_stop(self, async_client, mock_celery_tasks):
         """Stops Goabase sync."""
         response = await async_client.post("/api/goabase/sync/stop")
         assert response.status_code == 200
@@ -27,7 +27,7 @@ class TestGoabaseSync:
         response = await async_client.get("/api/goabase/sync/status")
         assert response.status_code == 200
         data = response.json()
-        assert "status" in data
+        assert "is_running" in data
 
 
 class TestGoabaseSettings:
@@ -39,7 +39,7 @@ class TestGoabaseSettings:
         response = await async_client.get("/api/goabase/settings")
         assert response.status_code == 200
         data = response.json()
-        assert "goabase_sync_enabled" in data or "settings" in data
+        assert "auto_goabase_sync_enabled" in data
 
     @pytest.mark.asyncio
     async def test_update(self, async_client):
@@ -47,7 +47,7 @@ class TestGoabaseSettings:
         response = await async_client.put(
             "/api/goabase/settings",
             json={
-                "goabase_sync_enabled": True,
+                "auto_goabase_sync_enabled": True,
                 "goabase_sync_frequency": "weekly",
                 "goabase_sync_day": "monday",
                 "goabase_sync_hour": 3,

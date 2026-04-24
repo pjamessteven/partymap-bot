@@ -5,19 +5,39 @@ from decimal import Decimal
 
 import pytest
 
-from src.core.schemas import EventDateData, MediaItem, ResearchedFestival, TicketInfo
+from src.core.schemas import (
+    EventDateData,
+    FestivalData,
+    MediaItem,
+    ResearchedFestival,
+    TicketInfo,
+)
 from src.partymap.mappers import FestivalMapper, GoabaseMapper
 
 
 class TestFestivalMapper:
     """Test FestivalMapper."""
 
+    def _make_festival_data(self, **overrides):
+        """Helper to build FestivalData with sensible defaults."""
+        defaults = {
+            "name": "Test Festival",
+            "description": "A test festival",
+            "full_description": "Full description here",
+            "event_dates": [
+                EventDateData(
+                    start=datetime(2026, 7, 15, 14, 0, 0),
+                    end=datetime(2026, 7, 17, 23, 0, 0),
+                    location_description="Berlin, Germany",
+                )
+            ],
+        }
+        defaults.update(overrides)
+        return FestivalData(**defaults)
+
     def test_to_create_event_request(self):
         """Test mapping to create event request."""
-        festival = ResearchedFestival(
-            name="Test Festival",
-            description="A test festival",
-            full_description="Full description here",
+        data = self._make_festival_data(
             website_url="https://example.com",
             logo_url="https://example.com/logo.jpg",
             tags=["psytrance", "outdoor"],
@@ -39,8 +59,11 @@ class TestFestivalMapper:
                     ],
                 )
             ],
-            media_items=[MediaItem(url="https://example.com/photo1.jpg", caption="Main stage")],
+            media_items=[
+                MediaItem(url="https://example.com/photo1.jpg", caption="Main stage")
+            ],
         )
+        festival = ResearchedFestival(festival_data=data)
 
         result = FestivalMapper.to_create_event_request(festival)
 
@@ -57,12 +80,15 @@ class TestFestivalMapper:
 
     def test_to_create_event_request_no_dates(self):
         """Test mapping fails without event dates."""
-        festival = ResearchedFestival(
+        data = FestivalData.model_construct(
             name="Test Festival",
+            description="A test festival",
+            full_description="Full description here",
             event_dates=[],
         )
+        festival = ResearchedFestival.model_construct(festival_data=data)
 
-        with pytest.raises(ValueError, match="event dates"):
+        with pytest.raises(ValueError, match="at least one event date"):
             FestivalMapper.to_create_event_request(festival)
 
     def test_to_add_event_date_request(self):
@@ -77,14 +103,14 @@ class TestFestivalMapper:
 
         result = FestivalMapper.to_add_event_date_request(event_date)
 
-        assert result["start"] == "2026-07-15T14:00:00"
-        assert result["end"] == "2026-07-17T23:00:00"
-        assert result["description"] == "Berlin, Germany"
+        assert result["date_time"]["start"] == "2026-07-15T14:00:00"
+        assert result["date_time"]["end"] == "2026-07-17T23:00:00"
+        assert result["location"]["description"] == "Berlin, Germany"
         assert result["size"] == 5000
 
     def test_to_update_event_request(self):
         """Test mapping update request."""
-        festival = ResearchedFestival(
+        data = FestivalData(
             name="Updated Name",
             description="Updated description",
             event_dates=[
@@ -94,13 +120,14 @@ class TestFestivalMapper:
                 )
             ],
         )
+        festival = ResearchedFestival(festival_data=data)
 
         result = FestivalMapper.to_update_event_request(festival, "Test update")
 
         assert result["message"] == "Test update"
         assert result["name"] == "Updated Name"
         assert result["description"] == "Updated description"
-        assert "date_time" in result
+        assert "date_time" not in result  # CRITICAL: update must NOT include date_time
 
     def test_map_tickets(self):
         """Test ticket mapping."""
@@ -125,7 +152,8 @@ class TestFestivalMapper:
         assert result[0]["description"] == "General Admission"
         assert result[0]["price_min"] == 50.0
         assert result[0]["price_currency_code"] == "EUR"
-        assert result[1]["price_max"] is None
+        # None values are filtered out by _map_tickets
+        assert "price_max" not in result[1]
 
 
 class TestGoabaseMapper:
@@ -169,13 +197,14 @@ class TestGoabaseMapper:
 
         result = GoabaseMapper.map_event_details(json_data, jsonld_data)
 
-        assert result.name == "Amazing Psytrance Festival"
-        assert len(result.event_dates) == 1
-        assert result.event_dates[0].location_description == "Mystic Woods, Berlin, Germany"
-        assert len(result.event_dates[0].lineup) == 3
-        assert "goabase" in result.tags
-        assert "psytrance" in result.tags
-        assert "open air" in result.tags
+        # Result is a ResearchedFestival with wrapped festival_data
+        assert result.festival_data.name == "Amazing Psytrance Festival"
+        assert len(result.festival_data.event_dates) == 1
+        assert result.festival_data.event_dates[0].location_description == "Mystic Woods, Berlin, Germany"
+        assert len(result.festival_data.event_dates[0].lineup) == 3
+        assert "goabase" in result.festival_data.tags
+        assert "psytrance" in result.festival_data.tags
+        assert "open air" in result.festival_data.tags
 
     def test_parse_description_with_lineup(self):
         """Test parsing description with lineup."""
